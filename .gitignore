@@ -1,0 +1,7 @@
+# Neovim / Lua
+*.luac
+tags
+
+# OS
+.DS_Store
+Thumbs.db
