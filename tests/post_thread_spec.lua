@@ -41,7 +41,13 @@ vim.system = function(cmd, _opts)
   captured = { argv = argv, body = vim.json.decode(body) }
   return {
     wait = function()
-      return { code = 0, stdout = '{"id": 4242}', stderr = '' }
+      -- `az devops invoke` prepends this human preamble to *stdout* before the
+      -- JSON (unlike `az repos ...`), so az_json must tolerate leading noise.
+      return {
+        code = 0,
+        stdout = 'Please wait a couple of seconds while we fetch all required information.\n{"id": 4242}',
+        stderr = '',
+      }
     end,
   }
 end

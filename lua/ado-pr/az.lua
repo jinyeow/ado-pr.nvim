@@ -11,13 +11,26 @@ local M = {}
 
 local config = require('ado-pr.config')
 
+-- On Windows the CLI entry point is `az.cmd`; libuv's spawn does no PATHEXT
+-- search, so a bare `az` ENOENTs. Name the executable explicitly per-OS.
+local az_exe = vim.fn.has('win32') == 1 and 'az.cmd' or 'az'
+M.az_exe = az_exe
+
 -- Run an az command; return (decoded_json|nil, err|nil).
 local function az_json(args)
-  local res = vim.system(vim.list_extend({ 'az' }, args), { text = true }):wait()
+  local res = vim.system(vim.list_extend({ az_exe }, args), { text = true }):wait()
   if res.code ~= 0 then
     return nil, (res.stderr ~= '' and res.stderr or ('az exited ' .. res.code))
   end
-  local ok, decoded = pcall(vim.json.decode, res.stdout)
+  -- `az devops invoke` prints a "Please wait ..." preamble to stdout before the
+  -- JSON body; skip anything before the first `{`/`[` (a no-op for clean
+  -- `az repos ...` output, which already starts at the brace).
+  local out = res.stdout or ''
+  local start = out:find('[%[{]')
+  if start then
+    out = out:sub(start)
+  end
+  local ok, decoded = pcall(vim.json.decode, out)
   if not ok then
     return nil, 'failed to decode az output: ' .. tostring(decoded)
   end
@@ -68,7 +81,7 @@ end
 -- Checkout a PR's source branch into the CURRENT worktree (needs a clean tree).
 -- Intended to run from the user's dedicated detached `review` worktree.
 function M.checkout(id)
-  local res = vim.system({ 'az', 'repos', 'pr', 'checkout', '--id', tostring(id) }, { text = true }):wait()
+  local res = vim.system({ az_exe, 'repos', 'pr', 'checkout', '--id', tostring(id) }, { text = true }):wait()
   if res.code ~= 0 then
     return false, (res.stderr ~= '' and res.stderr or ('az exited ' .. res.code))
   end
@@ -80,7 +93,7 @@ end
 function M.set_vote(id, vote)
   local args = { 'repos', 'pr', 'set-vote', '--id', tostring(id), '--vote', vote }
   vim.list_extend(args, scope_args())
-  local res = vim.system(vim.list_extend({ 'az' }, args), { text = true }):wait()
+  local res = vim.system(vim.list_extend({ az_exe }, args), { text = true }):wait()
   return res.code == 0, (res.code ~= 0 and (res.stderr ~= '' and res.stderr or 'set-vote failed') or nil)
 end
 
