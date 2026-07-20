@@ -1,7 +1,6 @@
 -- ado-pr.nvim — review Azure DevOps pull requests from Neovim.
--- MVP scope: pick/checkout/diff active PRs and set a vote via the `az` CLI,
--- reusing diffview.nvim for the diff UI. Inline comment threads are stubbed
--- (see az.post_thread TODO).
+-- MVP scope: pick/checkout/diff active PRs, set a vote, and post inline comment
+-- threads via the `az` CLI, reusing diffview.nvim for the diff UI.
 local M = {}
 
 M.config = require('ado-pr.config')
@@ -21,6 +20,10 @@ end
 
 function M.vote(id, v)
   return require('ado-pr.az').set_vote(id, v)
+end
+
+function M.comment()
+  return require('ado-pr.review').comment()
 end
 
 return M

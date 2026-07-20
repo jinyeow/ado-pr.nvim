@@ -37,6 +37,16 @@ local function scope_args()
   return a
 end
 
+-- Just --organization. `az devops invoke` takes project via --route-parameters,
+-- not --project, so it must not get the full scope_args.
+local function org_args()
+  local a, c = {}, config.get()
+  if c.organization then
+    vim.list_extend(a, { '--organization', c.organization })
+  end
+  return a
+end
+
 -- List active PRs for the configured repo.
 function M.list_prs()
   local args = { 'repos', 'pr', 'list', '--status', 'active', '--output', 'json' }
@@ -74,21 +84,56 @@ function M.set_vote(id, vote)
   return res.code == 0, (res.code ~= 0 and (res.stderr ~= '' and res.stderr or 'set-vote failed') or nil)
 end
 
--- TODO(mvp): post an inline comment thread via `az devops invoke`:
---   az devops invoke --area git --resource pullRequestThreads --http-method POST
---     --route-parameters project={p} repositoryId={r} pullRequestId={id}
---     --in-file <thread.json> --api-version {config.api_version}
--- thread.json shape:
---   { "comments": [{ "content": "...", "commentType": 1 }],
---     "status": 1,
---     "threadContext": { "filePath": "/path",
---       "rightFileStart": { "line": L, "offset": 1 },
---       "rightFileEnd":   { "line": L, "offset": 1 } } }
--- The hard part is mapping the diffview buffer's cursor to (filePath, line) on
--- the correct side — see the cobalt initiative's "cursor file != displayed file"
--- gotcha before implementing.
-function M.post_thread(id, thread) -- luacheck: ignore 212
-  return nil, 'not implemented: see TODO in az.lua (az devops invoke pullRequestThreads)'
+-- Post an inline comment thread on a PR via `az devops invoke` (no first-class
+-- `az repos pr comment` verb exists). Resource `git/pullRequestThreads` maps to
+--   POST git/repositories/{repo}/pullRequests/{id}/threads
+-- The threadContext body shape is mirrored from cobalt's tested client:
+--   status 1 = active; commentType 1 = text; a one-based line/offset on the
+--   right (new) side or the left (old) side, never both.
+--   ctx:    { id, repositoryId, project } (see ado-pr.state)
+--   anchor: { filePath = '/rel', line, side = 'right'|'left' } (see ado-pr.anchor)
+-- Returns (thread_id|nil, err|nil).
+function M.post_thread(ctx, anchor, content)
+  local pos = { line = anchor.line, offset = 1 }
+  local thread_context = { filePath = anchor.filePath }
+  if anchor.side == 'left' then
+    thread_context.leftFileStart, thread_context.leftFileEnd = pos, pos
+  else
+    thread_context.rightFileStart, thread_context.rightFileEnd = pos, pos
+  end
+  local thread = {
+    comments = { { content = content, commentType = 1 } },
+    status = 1,
+    threadContext = thread_context,
+  }
+
+  local tmp = vim.fn.tempname()
+  local f, ferr = io.open(tmp, 'w')
+  if not f then
+    return nil, 'could not write thread body to ' .. tmp .. ': ' .. tostring(ferr)
+  end
+  f:write(vim.json.encode(thread))
+  f:close()
+
+  local args = {
+    'devops', 'invoke',
+    '--area', 'git', '--resource', 'pullRequestThreads',
+    '--http-method', 'POST',
+    '--route-parameters',
+    'project=' .. ctx.project,
+    'repositoryId=' .. ctx.repositoryId,
+    'pullRequestId=' .. tostring(ctx.id),
+    '--in-file', tmp,
+    '--api-version', config.get().api_version,
+    '--output', 'json',
+  }
+  vim.list_extend(args, org_args())
+  local decoded, err = az_json(args)
+  os.remove(tmp)
+  if not decoded then
+    return nil, err
+  end
+  return decoded.id, nil
 end
 
 return M

@@ -19,3 +19,7 @@ vim.api.nvim_create_user_command('AdoPrVote', function(o)
     ok and vim.log.levels.INFO or vim.log.levels.ERROR
   )
 end, { nargs = '+', desc = 'ado-pr: AdoPrVote <id> approve|wait-for-author|reject|reset' })
+
+vim.api.nvim_create_user_command('AdoPrComment', function()
+  require('ado-pr').comment()
+end, { desc = 'ado-pr: comment on the diff line under the cursor' })

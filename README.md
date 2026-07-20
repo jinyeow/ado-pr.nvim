@@ -2,8 +2,8 @@
 
 Review **Azure DevOps** pull requests from Neovim — the gap `octo.nvim` leaves (it's GitHub-only).
 
-> **Status: MVP scaffold.** Pick / checkout / diff active PRs and set a vote work through the `az`
-> CLI; inline comment threads are stubbed. Not published.
+> **Status: MVP.** Pick / checkout / diff active PRs, set a vote, and post inline comment threads
+> through the `az` CLI. Not yet smoke-tested against a live PR; not published.
 
 ## Why
 
@@ -37,6 +37,7 @@ require('ado-pr').setup({
 | `:AdoPr` | Pick an active PR (fzf-lua) → checkout + diff |
 | `:AdoPrReview <id>` | Checkout PR `<id>` into the current worktree and open its diff |
 | `:AdoPrVote <id> <vote>` | `approve` / `approve-with-suggestions` / `wait-for-author` / `reject` / `reset` |
+| `:AdoPrComment` | Comment on the diff line under the cursor (right/left side from the focused pane) |
 
 Run these from a **dedicated detached `review` worktree** — `az repos pr checkout` needs a clean tree
 and fails if the PR's branch already has a worktree. See the review-worktree workflow.
@@ -47,24 +48,28 @@ and fails if the PR's branch already has a worktree. See the review-worktree wor
 lua/ado-pr/
   init.lua     setup() + lazy accessors
   config.lua   user config (org/project/repo/base_branch)
-  az.lua       az CLI + `az devops invoke` glue (reads, checkout, vote; threads = TODO)
-  review.lua   checkout → DiffviewOpen base...HEAD
+  az.lua       az CLI + `az devops invoke` glue (reads, checkout, vote, post thread)
+  anchor.lua   diffview cursor → (filePath, line, side) ADO thread anchor (pure + adapter)
+  state.lua    active-PR context (id/repoId/project) for the review session
+  review.lua   checkout → DiffviewOpen base...HEAD; post inline comments
   picker.lua   fzf-lua active-PR picker
 plugin/ado-pr.lua  user commands
+tests/         headless assert specs (`nvim --headless -l tests/<name>_spec.lua`)
 ```
 
 ## Roadmap (MVP → parity)
 
 1. **[done] Read/checkout/diff/vote** via `az`.
-2. **[next] Inline comment threads** — `az devops invoke --resource pullRequestThreads` POST; map the
-   diffview cursor to `(filePath, line, side)`. See `az.lua` `post_thread` TODO.
-3. Show existing threads as virtual text / signs in the diff buffers.
+2. **[done] Inline comment threads** — `az devops invoke --resource pullRequestThreads` POST; the
+   diffview cursor maps to `(filePath, line, side)` in `anchor.lua`. Needs a live-PR smoke test.
+3. **[next]** Show existing threads as virtual text / signs in the diff buffers.
 4. Live refresh, reviewers, status checks.
 
-The hard part is step 2/3: anchoring threads onto diffview buffers. See the **cobalt** project
-(`E:\Personal Projects\cobalt`, a vim-flavored ADO TUI that already does client-side PR review) and its
-"the cursor's file and the displayed file are different things" gotcha before implementing — anchor on
-the *displayed* diff path, never the file-tree cursor.
+The hard part is step 2/3: anchoring threads onto diffview buffers. Side is taken from the **focused
+diff pane** (right = new, left = old), and the path from diffview's `cur_entry` — the *displayed* diff
+file, never the file-tree cursor (the **cobalt** gotcha: "the cursor's file and the displayed file are
+different things"). See `E:\Personal Projects\cobalt`, a vim-flavored ADO TUI whose tested client the
+thread-body shape here mirrors.
 
 ## Related
 
