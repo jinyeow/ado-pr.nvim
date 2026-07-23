@@ -12,7 +12,8 @@ local M = {}
 
 -- Pure resolver. opts:
 --   path     new-side repo-relative path (diffview FileEntry.path)
---   oldpath  old-side repo-relative path (FileEntry.oldpath; may be nil)
+--   oldpath  old-side repo-relative path (FileEntry.oldpath; set ONLY on renames)
+--   status   git status letter (FileEntry.status: 'A' added, 'D' deleted, …)
 --   winid_a  left/old diff window id
 --   winid_b  right/new diff window id
 --   cur_win  the currently focused window id
@@ -28,9 +29,19 @@ function M.resolve(opts)
     return nil, 'cursor is not in a diff window (comment from the diff, not the file panel)'
   end
 
-  local raw = opts.path
+  -- Which sides exist is a STATUS question, not an oldpath one: diffview only
+  -- sets oldpath on renames, so a plain modified file's left side is `path`.
+  local raw
   if side == 'left' then
-    raw = opts.oldpath
+    if opts.status == 'A' then
+      return nil, 'no left (old) side on an added file'
+    end
+    raw = opts.oldpath or opts.path
+  else
+    if opts.status == 'D' then
+      return nil, 'no right (new) side on a deleted file'
+    end
+    raw = opts.path
   end
   if not raw or raw == '' or raw == 'null' then
     return nil, 'no file on the ' .. side .. ' side to anchor to'
@@ -62,6 +73,7 @@ function M.current()
   return M.resolve({
     path = entry.path,
     oldpath = entry.oldpath,
+    status = entry.status,
     winid_a = layout.a and layout.a.id,
     winid_b = layout.b and layout.b.id,
     cur_win = vim.api.nvim_get_current_win(),

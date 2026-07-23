@@ -62,13 +62,34 @@ do
   ok(a == nil and err ~= nil, 'panel cursor: rejected', tostring(err))
 end
 
--- Left side of an added file (no old path) is an error — nothing to anchor to.
+-- Left side of a plain MODIFIED file: diffview only sets oldpath on renames, so
+-- nil oldpath falls back to path (found live: every left-pane comment on a
+-- modified file errored 'no file on the left side').
 do
   local a, err = anchor.resolve({
-    path = 'src/added.lua', oldpath = nil,
+    path = 'src/foo.lua', oldpath = nil, status = 'M',
+    winid_a = 1000, winid_b = 1001, cur_win = 1000, cur_line = 9,
+  })
+  ok(a and not err, 'modified left: no error', err)
+  eq(a, { filePath = '/src/foo.lua', line = 9, side = 'left' }, 'modified left falls back to path')
+end
+
+-- Left side of an ADDED file is an error — added-ness is status, not nil oldpath.
+do
+  local a, err = anchor.resolve({
+    path = 'src/added.lua', oldpath = nil, status = 'A',
     winid_a = 1000, winid_b = 1001, cur_win = 1000, cur_line = 5,
   })
   ok(a == nil and err ~= nil, 'added file left side: rejected', tostring(err))
+end
+
+-- Right side of a DELETED file is an error — no new side exists.
+do
+  local a, err = anchor.resolve({
+    path = 'src/deleted.lua', oldpath = nil, status = 'D',
+    winid_a = 1000, winid_b = 1001, cur_win = 1001, cur_line = 5,
+  })
+  ok(a == nil and err ~= nil, 'deleted file right side: rejected', tostring(err))
 end
 
 -- A "null" path sentinel (diffview's deleted-side marker) is an error.
