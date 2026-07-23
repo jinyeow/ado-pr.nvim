@@ -53,7 +53,12 @@ function M.current()
     return nil, 'no active diffview file under the cursor'
   end
   local entry = view.cur_entry
-  local layout = entry.layout
+  -- The on-screen diff windows are view.cur_layout's — a CLONE the view makes of the
+  -- entry's layout (diffview standard_view.lua: `self.cur_layout = layout:clone()`,
+  -- and use_entry() renders through self.cur_layout). entry.layout is the template;
+  -- its window ids are never the displayed ones (live smoke test 2026-07-23: every
+  -- comment errored 'cursor is not in a diff window').
+  local layout = view.cur_layout
   return M.resolve({
     path = entry.path,
     oldpath = entry.oldpath,
