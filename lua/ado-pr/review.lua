@@ -40,7 +40,8 @@ function M.open(id)
 end
 
 -- Post an inline comment thread on the line under the cursor in the diff.
-function M.comment()
+-- text: optional comment content (`:AdoPrComment some text`); prompted when nil.
+function M.comment(text)
   local ctx = state.get()
   if not ctx or not ctx.repositoryId then
     vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
@@ -51,9 +52,7 @@ function M.comment()
     vim.notify('ado-pr: ' .. err, vim.log.levels.ERROR)
     return
   end
-  vim.ui.input({
-    prompt = ('PR comment @ %s:%d (%s): '):format(a.filePath, a.line, a.side),
-  }, function(content)
+  local function post(content)
     if not content or content == '' then
       return
     end
@@ -62,7 +61,13 @@ function M.comment()
       thread_id and ('ado-pr: thread posted on !' .. ctx.id) or ('ado-pr: ' .. (perr or 'post failed')),
       thread_id and vim.log.levels.INFO or vim.log.levels.ERROR
     )
-  end)
+  end
+  if text then
+    return post(text)
+  end
+  vim.ui.input({
+    prompt = ('PR comment @ %s:%d (%s): '):format(a.filePath, a.line, a.side),
+  }, post)
 end
 
 return M
