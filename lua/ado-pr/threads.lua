@@ -99,8 +99,12 @@ function M.original(thread)
 end
 
 -- Clamp a { line_start, line_end } range into [1, line_count], never erroring on a
--- range that has outlived the buffer it was written against.
+-- range that has outlived the buffer it was written against. A zero-line buffer has
+-- no valid line in [1, 0]; both ends collapse to 0 rather than falsely reporting line 1.
 function M.clamp(range, line_count)
+  if line_count == 0 then
+    return { line_start = 0, line_end = 0 }
+  end
   local function clamp_line(l)
     return math.max(1, math.min(l, line_count))
   end

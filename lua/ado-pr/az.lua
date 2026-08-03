@@ -160,13 +160,19 @@ function M.post_thread(ctx, anchor, content)
 end
 
 -- Shared decoder: `az devops invoke` on a list resource returns
--- { count, value = { ...items... } }; unwrap to the array. Returns
--- (threads|nil, err|nil).
+-- { count, value = { ...items... } }; unwrap to the array. A response missing
+-- `value` (or with `value` not an array/table) does not match that envelope --
+-- raise rather than silently treating a real transport/schema failure as "no
+-- comments". `{ count = 0, value = {} }` (a PR with zero threads) is a valid
+-- envelope and still decodes to an empty list. Returns (threads|nil, err|nil).
 local function decode_threads(decoded, err)
   if not decoded then
     return nil, err
   end
-  return decoded.value or {}, nil
+  if type(decoded) ~= 'table' or type(decoded.value) ~= 'table' then
+    return nil, 'malformed thread response: expected { count, value = {...} } envelope, got ' .. vim.inspect(decoded)
+  end
+  return decoded.value, nil
 end
 
 -- Plain thread list: no trackingCriteria on any thread (ADR-0002). Same

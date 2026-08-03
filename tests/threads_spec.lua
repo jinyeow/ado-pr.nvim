@@ -161,6 +161,13 @@ do
   eq(c, { line_start = 45, line_end = 50 }, 'clamp: partial overrun clamps end only')
 end
 
+-- A zero-line buffer has no valid line at all: [1, 0] is empty, so clamping into it
+-- must not return line 1 (outside that range). Both ends collapse to 0.
+do
+  local c = threads.clamp({ line_start = 5, line_end = 10 }, 0)
+  eq(c, { line_start = 0, line_end = 0 }, 'clamp: zero-line buffer clamps to 0')
+end
+
 -- ---------------------------------------------------------------------------
 -- path normalisation
 -- ---------------------------------------------------------------------------

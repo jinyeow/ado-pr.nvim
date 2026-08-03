@@ -106,6 +106,31 @@ do
   ok(decoded == nil and err == 'boom', 'list_threads: az failure propagates', tostring(err))
 end
 
+-- A genuinely empty result (count = 0, value = {}) is a valid response, not malformed --
+-- must still decode to an empty list, not error.
+do
+  stub_response({ count = 0, value = {} })
+  local decoded, err = az.list_threads(ctx)
+  ok(decoded and not err, 'list_threads: empty value decodes without error', err)
+  eq(decoded, {}, 'list_threads: empty value decodes to {}')
+end
+
+-- Malformed response: missing `value` field entirely (not the {count, value} envelope).
+-- This must raise, not silently default to an empty list -- masking a real transport/
+-- schema failure as "no comments" would violate the repo's error-handling convention.
+do
+  stub_response({ count = 0 })
+  local decoded, err = az.list_threads(ctx)
+  ok(decoded == nil and err ~= nil, 'list_threads: missing value field errors', tostring(err))
+end
+
+-- Malformed response: `value` present but wrong type (not an array/table).
+do
+  stub_response({ count = 0, value = 'oops' })
+  local decoded, err = az.list_threads(ctx)
+  ok(decoded == nil and err ~= nil, 'list_threads: wrong-typed value field errors', tostring(err))
+end
+
 vim.system = real_system
 
 if #failures > 0 then
