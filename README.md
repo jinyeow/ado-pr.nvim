@@ -15,7 +15,10 @@ knows nothing about PRs (threads, votes, reviewers). This is the thin ADO layer 
 - Neovim 0.10+ (`vim.system`)
 - [`az` CLI](https://learn.microsoft.com/cli/azure/) + `az extension add --name azure-devops`, logged in via `az login`
 - [`fzf-lua`](https://github.com/ibhagwan/fzf-lua) — PR picker
-- [`diffview.nvim`](https://github.com/sindrets/diffview.nvim) — diff UI (falls back to vim-fugitive `Git difftool`)
+- [`diffview-plus.nvim`](https://github.com/dlyongemallo/diffview-plus.nvim) — diff UI (falls back to
+  vim-fugitive `Git difftool`). The maintained fork of `sindrets/diffview.nvim`, which has had no
+  commits since 2024-06. Same `diffview.*` module namespace, so upstream works too — but the fork is
+  what this plugin is developed against.
 
 Auth reuses `az login`. **No PAT or secret is stored by this plugin.**
 
