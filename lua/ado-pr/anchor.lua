@@ -51,31 +51,22 @@ function M.resolve(opts)
   return { filePath = filePath, line = opts.cur_line, side = side }
 end
 
--- Adapter: read the active diffview view and resolve the cursor. Untested (thin
--- glue over diffview internals — `cur_entry`/`layout.a|b.id`); validated by smoke
--- test. Keep logic in `resolve`, above.
+-- Adapter: read the active diffview view (via ado-pr.diffview_state) and
+-- resolve the cursor. Untested (thin glue over diffview internals); validated
+-- by smoke test. Keep logic in `resolve`, above.
 function M.current()
-  local ok, lib = pcall(require, 'diffview.lib')
-  if not ok then
-    return nil, 'diffview.nvim is not available'
+  local diffview_state = require('ado-pr.diffview_state')
+  local state, err = diffview_state.current()
+  if not state then
+    return nil, err
   end
-  local view = lib.get_current_view()
-  if not view or not view.cur_entry then
-    return nil, 'no active diffview file under the cursor'
-  end
-  local entry = view.cur_entry
-  -- The on-screen diff windows are view.cur_layout's — a CLONE the view makes of the
-  -- entry's layout (diffview standard_view.lua: `self.cur_layout = layout:clone()`,
-  -- and use_entry() renders through self.cur_layout). entry.layout is the template;
-  -- its window ids are never the displayed ones (live smoke test 2026-07-23: every
-  -- comment errored 'cursor is not in a diff window').
-  local layout = view.cur_layout
+  local windows = state.windows
   return M.resolve({
-    path = entry.path,
-    oldpath = entry.oldpath,
-    status = entry.status,
-    winid_a = layout.a and layout.a.id,
-    winid_b = layout.b and layout.b.id,
+    path = state.entry.path,
+    oldpath = state.entry.oldpath,
+    status = state.entry.status,
+    winid_a = windows.a and windows.a.winid,
+    winid_b = windows.b and windows.b.winid,
     cur_win = vim.api.nvim_get_current_win(),
     cur_line = vim.api.nvim_win_get_cursor(0)[1],
   })

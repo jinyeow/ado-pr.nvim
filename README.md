@@ -53,6 +53,7 @@ lua/ado-pr/
   config.lua   user config (org/project/repo/base_branch)
   az.lua       az CLI + `az devops invoke` glue (reads, checkout, vote, post thread)
   anchor.lua   diffview cursor → (filePath, line, side) ADO thread anchor (pure + adapter)
+  diffview_state.lua  active diffview view: entry, layout kind, per-side win/buf, inline hunks
   state.lua    active-PR context (id/repoId/project) for the review session
   review.lua   checkout → DiffviewOpen base...HEAD; post inline comments
   picker.lua   fzf-lua active-PR picker
