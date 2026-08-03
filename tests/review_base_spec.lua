@@ -16,6 +16,7 @@ package.loaded['diffview'] = {}
 
 local az = require('ado-pr.az')
 local review = require('ado-pr.review')
+local state = require('ado-pr.state')
 
 local failures, count = {}, 0
 local function ok(cond, name, detail)
@@ -110,11 +111,15 @@ end
 -- Happy path: fetch runs (argv + cwd), before DiffviewOpen, with a revspec
 -- built from the resolved target (rev-parsed FETCH_HEAD), not config.
 do
+  local expected_cwd = vim.fn.getcwd()
   reset({ target_ref = 'refs/heads/develop' })
   review.open(99)
 
   local fetch_idx = index_of(function(c)
     return c.kind == 'system' and c.cmd[1] == 'git' and c.cmd[2] == 'fetch'
+  end)
+  local revparse_idx = index_of(function(c)
+    return c.kind == 'system' and c.cmd[1] == 'git' and c.cmd[2] == 'rev-parse'
   end)
   local diff_idx = index_of(function(c) return c.kind == 'cmd' end)
 
@@ -123,9 +128,19 @@ do
     local fetch_call = calls[fetch_idx]
     ok(vim.deep_equal(fetch_call.cmd, { 'git', 'fetch', 'origin', 'refs/heads/develop' }),
       'happy: fetch argv (remote + resolved target ref)', vim.inspect(fetch_call.cmd))
-    -- cwd passed explicitly (not left ambient) — the ticket requires the
-    -- fetch to run with the review worktree as cwd.
-    ok(fetch_call.opts and fetch_call.opts.cwd ~= nil, 'happy: fetch cwd set explicitly')
+    -- cwd passed explicitly as the review worktree's cwd (not left ambient,
+    -- and not some other directory).
+    ok(fetch_call.opts and fetch_call.opts.cwd == expected_cwd,
+      'happy: fetch cwd is the review worktree', vim.inspect(fetch_call.opts))
+  end
+
+  ok(revparse_idx ~= nil, 'happy: git rev-parse issued')
+  if revparse_idx then
+    local revparse_call = calls[revparse_idx]
+    ok(vim.deep_equal(revparse_call.cmd, { 'git', 'rev-parse', 'FETCH_HEAD' }),
+      'happy: rev-parse argv', vim.inspect(revparse_call.cmd))
+    ok(revparse_call.opts and revparse_call.opts.cwd == expected_cwd,
+      'happy: rev-parse cwd is the review worktree', vim.inspect(revparse_call.opts))
   end
 
   ok(diff_idx ~= nil, 'happy: DiffviewOpen issued')
@@ -134,6 +149,8 @@ do
     ok(calls[diff_idx].cmd == 'DiffviewOpen deadbeef...HEAD',
       'happy: revspec from resolved target', calls[diff_idx].cmd)
   end
+
+  ok(state.get() and state.get().id == 99, 'happy: active-PR state set after a successful diff open')
 end
 
 -- A show_pr failure aborts: no fetch, no diff, an ERROR notify.
@@ -152,8 +169,11 @@ do
   ok(has_error, 'show_pr failure: notifies at ERROR')
 end
 
--- A git fetch failure aborts: no diff, an ERROR notify.
+-- A git fetch failure aborts: no diff, an ERROR notify, and the active-PR
+-- state must NOT have switched to this PR — no correct diff opened, so a
+-- subsequent :AdoPrComment must not be able to post against it.
 do
+  state.set({ id = 'previous-pr', repositoryId = 'previous-repo', project = 'previous' })
   reset({ fetch_result = { code = 1, stdout = '', stderr = 'no route to host' } })
   review.open(2)
 
@@ -163,10 +183,37 @@ do
     if n.level == vim.log.levels.ERROR then has_error = true end
   end
   ok(has_error, 'fetch failure: notifies at ERROR')
+  ok(state.get() and state.get().id == 'previous-pr',
+    'fetch failure: active-PR state left untouched', vim.inspect(state.get()))
+end
+
+-- A persistent git fetch failure retries with a WARN per failed attempt
+-- before the final ERROR — the repo's "retry-with-warning, then raise"
+-- convention for external calls.
+do
+  reset({ fetch_result = { code = 1, stdout = '', stderr = 'no route to host' } })
+  review.open(5)
+
+  local fetch_attempts = 0
+  for _, c in ipairs(system_calls()) do
+    if c.cmd[1] == 'git' and c.cmd[2] == 'fetch' then fetch_attempts = fetch_attempts + 1 end
+  end
+  ok(fetch_attempts > 1, 'persistent fetch failure: retried more than once', fetch_attempts)
+
+  local warn_count, error_count = 0, 0
+  for _, n in ipairs(notifications) do
+    if n.level == vim.log.levels.WARN then warn_count = warn_count + 1 end
+    if n.level == vim.log.levels.ERROR then error_count = error_count + 1 end
+  end
+  ok(warn_count == fetch_attempts - 1, 'persistent fetch failure: WARN per failed attempt except the last',
+    warn_count .. ' vs ' .. (fetch_attempts - 1))
+  ok(error_count > 0, 'persistent fetch failure: raises ERROR after the final attempt')
+  ok(#cmd_calls() == 0, 'persistent fetch failure: DiffviewOpen never called')
 end
 
 -- A missing targetRefName in the PR payload aborts before any fetch.
 do
+  state.set({ id = 'previous-pr', repositoryId = 'previous-repo', project = 'previous' })
   reset({ target_ref = '' })
   review.open(3)
 
@@ -180,6 +227,8 @@ do
     if n.level == vim.log.levels.ERROR then has_error = true end
   end
   ok(has_error, 'missing targetRefName: notifies at ERROR')
+  ok(state.get() and state.get().id == 'previous-pr',
+    'missing targetRefName: active-PR state left untouched', vim.inspect(state.get()))
 end
 
 -- A rev-parse failure (fetch succeeded but FETCH_HEAD won't resolve) aborts.

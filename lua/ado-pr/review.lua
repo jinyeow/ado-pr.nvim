@@ -18,6 +18,34 @@ local function capture_context(id, pr)
   })
 end
 
+-- Number of git-fetch attempts before giving up (retry-with-warning, then
+-- raise the last error — see AGENTS.md "External API or service calls").
+local FETCH_RETRIES = 3
+
+-- Run `git fetch origin <target_ref>` in cwd, retrying on failure (and
+-- guarding against vim.system itself erroring on a spawn failure). Warns on
+-- every failed attempt but the last; returns the final result either way.
+local function fetch_target_ref(target_ref, cwd)
+  local fetch
+  for attempt = 1, FETCH_RETRIES do
+    local call_ok, result = pcall(function()
+      return vim.system({ 'git', 'fetch', 'origin', target_ref }, { text = true, cwd = cwd }):wait()
+    end)
+    fetch = call_ok and result or { code = -1, stdout = '', stderr = tostring(result) }
+    if fetch.code == 0 then
+      return fetch
+    end
+    local detail = fetch.stderr ~= '' and fetch.stderr or ('exit ' .. fetch.code)
+    if attempt < FETCH_RETRIES then
+      vim.notify(
+        ('ado-pr: git fetch %s failed (attempt %d/%d): %s, retrying'):format(target_ref, attempt, FETCH_RETRIES, detail),
+        vim.log.levels.WARN
+      )
+    end
+  end
+  return fetch
+end
+
 -- Fetch the PR's real target ref and resolve it to a commit, so the review
 -- diffs against what ADO actually targeted (not a possibly-stale, possibly-
 -- wrong local ref). Runs with the review worktree as cwd. Returns
@@ -28,9 +56,10 @@ local function resolve_base(pr)
     return nil, 'PR payload missing targetRefName'
   end
   local cwd = vim.fn.getcwd()
-  local fetch = vim.system({ 'git', 'fetch', 'origin', target_ref }, { text = true, cwd = cwd }):wait()
+  local fetch = fetch_target_ref(target_ref, cwd)
   if fetch.code ~= 0 then
-    return nil, 'git fetch ' .. target_ref .. ' failed: ' .. (fetch.stderr ~= '' and fetch.stderr or ('exit ' .. fetch.code))
+    local detail = fetch.stderr ~= '' and fetch.stderr or ('exit ' .. fetch.code)
+    return nil, 'git fetch ' .. target_ref .. ' failed after ' .. FETCH_RETRIES .. ' attempts: ' .. detail
   end
   local revparse = vim.system({ 'git', 'rev-parse', 'FETCH_HEAD' }, { text = true, cwd = cwd }):wait()
   if revparse.code ~= 0 then
@@ -51,7 +80,6 @@ function M.open(id)
     state.clear()
     return
   end
-  capture_context(id, pr)
   local base, berr = resolve_base(pr)
   if not base then
     vim.notify('ado-pr: ' .. berr, vim.log.levels.ERROR)
@@ -62,6 +90,9 @@ function M.open(id)
   else
     vim.cmd('Git difftool ' .. base .. '...HEAD') -- vim-fugitive fallback
   end
+  -- Only now that the diff has actually opened does the active-PR state
+  -- (which :AdoPrComment relies on) switch to this PR.
+  capture_context(id, pr)
 end
 
 -- Post an inline comment thread on the line under the cursor in the diff.
