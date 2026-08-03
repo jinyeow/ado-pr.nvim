@@ -9,13 +9,7 @@ local state = require('ado-pr.state')
 
 -- Record the active-PR context so :AdoPrComment knows which PR/repo to post to.
 -- The threads route wants the repository GUID, taken from the PR payload.
-local function capture_context(id)
-  local pr, err = az.show_pr(id)
-  if not pr then
-    vim.notify('ado-pr: could not load PR !' .. id .. ' details (commenting disabled): ' .. err, vim.log.levels.WARN)
-    state.clear()
-    return
-  end
+local function capture_context(id, pr)
   local repo = pr.repository or {}
   state.set({
     id = id,
@@ -24,14 +18,45 @@ local function capture_context(id)
   })
 end
 
+-- Fetch the PR's real target ref and resolve it to a commit, so the review
+-- diffs against what ADO actually targeted (not a possibly-stale, possibly-
+-- wrong local ref). Runs with the review worktree as cwd. Returns
+-- (commit|nil, err|nil).
+local function resolve_base(pr)
+  local target_ref = pr.targetRefName
+  if not target_ref or target_ref == '' then
+    return nil, 'PR payload missing targetRefName'
+  end
+  local cwd = vim.fn.getcwd()
+  local fetch = vim.system({ 'git', 'fetch', 'origin', target_ref }, { text = true, cwd = cwd }):wait()
+  if fetch.code ~= 0 then
+    return nil, 'git fetch ' .. target_ref .. ' failed: ' .. (fetch.stderr ~= '' and fetch.stderr or ('exit ' .. fetch.code))
+  end
+  local revparse = vim.system({ 'git', 'rev-parse', 'FETCH_HEAD' }, { text = true, cwd = cwd }):wait()
+  if revparse.code ~= 0 then
+    return nil, 'git rev-parse FETCH_HEAD failed: ' .. (revparse.stderr ~= '' and revparse.stderr or ('exit ' .. revparse.code))
+  end
+  return vim.trim(revparse.stdout or ''), nil
+end
+
 function M.open(id)
   local ok, err = az.checkout(id)
   if not ok then
     vim.notify('ado-pr: checkout failed: ' .. err, vim.log.levels.ERROR)
     return
   end
-  capture_context(id)
-  local base = config.get().base_branch
+  local pr, perr = az.show_pr(id)
+  if not pr then
+    vim.notify('ado-pr: could not load PR !' .. id .. ' details: ' .. perr, vim.log.levels.ERROR)
+    state.clear()
+    return
+  end
+  capture_context(id, pr)
+  local base, berr = resolve_base(pr)
+  if not base then
+    vim.notify('ado-pr: ' .. berr, vim.log.levels.ERROR)
+    return
+  end
   if pcall(require, 'diffview') then
     vim.cmd('DiffviewOpen ' .. base .. '...HEAD')
   else

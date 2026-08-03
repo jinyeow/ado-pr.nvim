@@ -6,7 +6,6 @@ local defaults = {
   organization = nil, -- e.g. 'https://dev.azure.com/HollardInsuranceRetail'
   project = nil, -- e.g. 'TSC Cloud Platform Engineering'
   repository = nil, -- e.g. 'T2.ServiceCatalogue'
-  base_branch = 'origin/main', -- three-dot base for the review diff
   api_version = '7.1', -- ADO REST api-version for `az devops invoke`
 }
 
