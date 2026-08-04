@@ -29,6 +29,11 @@ require('ado-pr').setup({
   organization = 'https://dev.azure.com/YourOrg',
   project = 'Your Project',
   repository = 'Your.Repo',
+  keymaps = {
+    toggle_thread_pane = '<F8>', -- buffer-local to the diff, single-key by default
+    next_thread = ']t',
+    prev_thread = '[t',
+  },
 })
 ```
 
@@ -55,6 +60,7 @@ lua/ado-pr/
   threads.lua  filter + read-resolve ADO PR comment threads (pure: no Neovim API, no network)
   signs.lua    thread markers in diffview's diff buffers, both sides (adapter over threads.lua + hunks.lua + diffview_state)
   hunks.lua    map an old-side line through a hunk table to its new-buffer row (pure: no Neovim API, no diffview, no git)
+  view.lua     thread follower pane: split below the diff, tracks the cursor, ]t/[t (adapter)
   diffview_state.lua  active diffview view: entry, layout kind, per-side win/buf, inline hunks
   state.lua    active-PR context (id/repoId/project/base) for the review session
   review.lua   checkout → fetch PR target ref → DiffviewOpen target...HEAD; post/sign comment threads
@@ -72,8 +78,12 @@ tests/         headless assert specs (`nvim --headless -l tests/<name>_spec.lua`
    resolved, re-applied on diffview's buffer-enter event. Two-window layouts sign the old-side
    window directly; the single-window layouts (`diff1_inline`/`diff1_plain`/`diff1_raw`) map an
    old-side line through a hunk table (`hunks.lua`) to its real row, or count it as not showable
-   when the layout has none. The thread-body follower pane is next. Needs a live-PR smoke test.
-4. The thread-body follower pane, iteration browsing, live refresh, reviewers, status checks.
+   when the layout has none. Needs a live-PR smoke test.
+4. **[done] Thread follower pane** — a split below the diff shows the thread under the cursor;
+   `<F8>` toggles it, `]t`/`[t` jump between threads, all buffer-local to the diff and
+   user-configurable via `keymaps`. Overlapping threads show the narrowest covering one with a
+   visible count; cycling/picking between them is the next step. Needs a live-PR smoke test.
+5. Iteration browsing, live refresh, reviewers, status checks.
 
 The hard part is step 2/3: anchoring threads onto diffview buffers. Side is taken from the **focused
 diff pane** (right = new, left = old), and the path from diffview's `cur_entry` — the *displayed* diff

@@ -116,6 +116,56 @@ function M.norm_repo_path(path)
   return (path or ''):gsub('\\', '/'):gsub('^/', '')
 end
 
+local function shallow_copy(items)
+  local out = {}
+  for i, v in ipairs(items) do
+    out[i] = v
+  end
+  return out
+end
+
+-- Threads covering `line`, narrowest first (thread id as a stable tiebreak).
+-- `items` is signs.lua's { thread, range } shape for one file. Overlapping
+-- threads are the normal case: the follower pane shows only the
+-- first result, so this ordering IS the selection rule, not just a sort.
+function M.covering(items, line)
+  local hits = {}
+  for _, item in ipairs(items) do
+    if line >= item.range.line_start and line <= item.range.line_end then
+      table.insert(hits, item)
+    end
+  end
+  table.sort(hits, function(a, b)
+    local aw = a.range.line_end - a.range.line_start
+    local bw = b.range.line_end - b.range.line_start
+    if aw ~= bw then
+      return aw < bw
+    end
+    return (a.thread.id or 0) < (b.thread.id or 0)
+  end)
+  return hits
+end
+
+-- Every thread for one file (same { thread, range } shape), in the order
+-- `]t` / `[t` should visit them: by start line, then widest (outermost)
+-- first when two threads share a start, then id for stability. This is what
+-- keeps a jump landing on a containing thread before the ones nested in it.
+function M.ordered(items)
+  local out = shallow_copy(items)
+  table.sort(out, function(a, b)
+    if a.range.line_start ~= b.range.line_start then
+      return a.range.line_start < b.range.line_start
+    end
+    local aw = a.range.line_end - a.range.line_start
+    local bw = b.range.line_end - b.range.line_start
+    if aw ~= bw then
+      return aw > bw
+    end
+    return (a.thread.id or 0) < (b.thread.id or 0)
+  end)
+  return out
+end
+
 -- Clamp a { line_start, line_end } range into [1, line_count], never erroring on a
 -- range that has outlived the buffer it was written against. A zero-line buffer has
 -- no valid line in [1, 0]; both ends collapse to 0 rather than falsely reporting line 1.

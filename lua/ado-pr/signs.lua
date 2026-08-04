@@ -205,6 +205,19 @@ function M.plan(layout_kind, hunks, signed_items, entry_path, line_counts)
   return { placements = placements, not_showable = plan_not_showable }
 end
 
+-- Signed items (thread + resolved range) for one repo-relative path, normalised.
+-- The follower pane (view.lua) uses this to find the threads covering the cursor
+-- and to walk between them with ]t / [t.
+function M.items_for(path)
+  local out = {}
+  for _, item in ipairs(signed) do
+    if item.path == path then
+      table.insert(out, item)
+    end
+  end
+  return out
+end
+
 -- Re-render signs in diffview's current diff buffer(s) for the file under the cursor. A
 -- multi-line thread is marked across its whole span, not only at its first line. Threads
 -- on files outside the current diff scope are skipped (M.plan filters by entry_path).
