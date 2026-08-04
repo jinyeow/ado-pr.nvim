@@ -155,6 +155,85 @@ do
   vim.cmd('only')
 end
 
+-- ---------------------------------------------------------------------------
+-- Two concurrent Diffview sessions (one per tabpage) must not clobber each
+-- other's pane (issue #27): pane state used to be a single process-global
+-- table, so a second tab's session rewrote or closed the first's pane, and
+-- `M.attach()` cleared one shared augroup on every call, orphaning any prior
+-- session. Panes are now keyed by tabpage -- Diffview opens every view in its
+-- own new tab (`tab split` in diffview's `View:open()`), so the tabpage is
+-- each session's stable, natural key. This is real tabpage/window/augroup
+-- state, not a diffview mock -- same "no seam worth mocking" limit as the
+-- rest of this adapter, exercised directly instead.
+-- ---------------------------------------------------------------------------
+do
+  local tab1 = vim.api.nvim_get_current_tabpage()
+  view.attach()
+  ok(view.is_open(tab1), 'session 1: pane open in its own tab')
+  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadView' .. tostring(tab1) }),
+    'session 1: augroup exists')
+
+  vim.cmd('tabnew')
+  local tab2 = vim.api.nvim_get_current_tabpage()
+  view.attach()
+  ok(tab1 ~= tab2, 'sessions: distinct tabpages')
+  ok(view.is_open(tab2), 'session 2: pane open in its own tab')
+  ok(view.is_open(tab1), 'session 2 attach: session 1 pane still open (not orphaned)')
+  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadView' .. tostring(tab1) }),
+    'session 2 attach: session 1 augroup still exists (not cleared by session 2)')
+
+  -- A cursor move inside session 2's tab must never rewrite or close session
+  -- 1's pane.
+  vim.cmd('normal! j')
+  ok(view.is_open(tab1), 'cursor move in tab 2: session 1 pane untouched')
+  ok(view.is_open(tab2), 'cursor move in tab 2: session 2 pane untouched')
+
+  -- Register each session's per-file cursor-follower autocmds (normally done
+  -- on DiffviewDiffBufWinEnter/DiffviewViewOpened) so the teardown check
+  -- below observes a real augroup, not one that was never created.
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewOpened', modeline = false })
+  vim.wait(20)
+  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadViewCursor' .. tostring(tab1) }),
+    'DiffviewViewOpened: session 1 cursor augroup created')
+  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadViewCursor' .. tostring(tab2) }),
+    'DiffviewViewOpened: session 2 cursor augroup created')
+
+  -- Closing session 2's pane must close only session 2's, not session 1's.
+  view.close(tab2)
+  ok(not view.is_open(tab2), 'close(tab2): session 2 pane closed')
+  ok(view.is_open(tab1), 'close(tab2): session 1 pane left open')
+
+  -- Simulate Diffview's real teardown: it closes the view's own tabpage
+  -- *before* firing the global `DiffviewViewClosed` User event (verified
+  -- against diffview.nvim's source -- the event carries no per-view data).
+  -- Both sessions' handlers run off the same global event; only the one
+  -- whose own captured tab just went invalid should tear itself down.
+  vim.cmd('tabclose') -- closes tab2, returns focus to tab1
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewClosed', modeline = false })
+  vim.wait(20)
+  ok(view.is_open(tab1), 'DiffviewViewClosed after tab2 closed: session 1 pane untouched')
+  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadView' .. tostring(tab1) }),
+    'DiffviewViewClosed after tab2 closed: session 1 augroup untouched')
+  ok(not pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadViewCursor' .. tostring(tab2) }),
+    'DiffviewViewClosed after tab2 closed: session 2 cursor augroup torn down')
+
+  -- Re-attaching in a fresh tab must not orphan or leak session 1's pane.
+  vim.cmd('tabnew')
+  local tab3 = vim.api.nvim_get_current_tabpage()
+  view.attach()
+  ok(view.is_open(tab3), 'session 3 (new tab): pane open')
+  ok(view.is_open(tab1), 'session 3 attach: session 1 pane still open (not leaked/orphaned)')
+  view.close(tab3)
+  vim.cmd('tabclose')
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewClosed', modeline = false })
+  vim.wait(20)
+
+  view.close(tab1)
+  ok(not view.is_open(tab1), 'close(tab1): session 1 pane closed')
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewClosed', modeline = false })
+  vim.wait(20)
+end
+
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
   for _, f in ipairs(failures) do io.stderr:write('  - ' .. f .. '\n') end

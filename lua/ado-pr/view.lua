@@ -64,19 +64,31 @@ end
 -- Adapter: the pane window/buffer and diffview wiring
 -- ---------------------------------------------------------------------------
 
-local pane = { win = nil, buf = nil }
+-- Keyed by tabpage: Diffview opens every view in its own new tab (`tab split`
+-- in diffview's View:open()), so the tabpage is each review session's stable,
+-- natural key -- diffview exposes no other per-session id. A second concurrent
+-- session (another tab) must never rewrite or close a first session's pane.
+local sessions = {}
 
-function M.is_open()
-  return pane.win ~= nil and vim.api.nvim_win_is_valid(pane.win)
+local function session_for(tab)
+  tab = tab or vim.api.nvim_get_current_tabpage()
+  return sessions[tab]
+end
+
+function M.is_open(tab)
+  local s = session_for(tab)
+  return s ~= nil and s.win ~= nil and vim.api.nvim_win_is_valid(s.win)
 end
 
 -- Read whichever thread(s) cover the cursor in diffview's right-side window and
 -- render the narrowest one, or the empty-state lines when the cursor is on none.
 -- Never touches the diff windows -- only reads their cursor position.
-function M.refresh()
-  if not M.is_open() then
+function M.refresh(tab)
+  tab = tab or vim.api.nvim_get_current_tabpage()
+  if not M.is_open(tab) then
     return
   end
+  local s = sessions[tab]
   local lines = M.EMPTY_LINES
   local state = diffview_state.current()
   if state and state.windows.b and state.windows.b.bufnr then
@@ -87,9 +99,9 @@ function M.refresh()
       lines = M.format_thread(covering[1].thread, { index = 1, total = #covering })
     end
   end
-  vim.bo[pane.buf].modifiable = true
-  vim.api.nvim_buf_set_lines(pane.buf, 0, -1, false, lines)
-  vim.bo[pane.buf].modifiable = false
+  vim.bo[s.buf].modifiable = true
+  vim.api.nvim_buf_set_lines(s.buf, 0, -1, false, lines)
+  vim.bo[s.buf].modifiable = false
 end
 
 -- Snapshot/restore every window's scroll position (winsaveview) across a
@@ -118,42 +130,48 @@ end
 -- Open the pane below the diff without disturbing the diff windows or their
 -- scroll position: the split briefly takes focus to configure it, then focus
 -- and every window's view are restored. A no-op when already open.
-function M.open()
-  if M.is_open() then
+function M.open(tab)
+  tab = tab or vim.api.nvim_get_current_tabpage()
+  if M.is_open(tab) then
     return
   end
   local views = snapshot_views()
   local prev = vim.api.nvim_get_current_win()
   vim.cmd(('botright %dsplit'):format(HEIGHT))
-  pane.win = vim.api.nvim_get_current_win()
-  pane.buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_win_set_buf(pane.win, pane.buf)
-  vim.wo[pane.win].number = false
-  vim.wo[pane.win].relativenumber = false
-  vim.wo[pane.win].signcolumn = 'no'
-  vim.bo[pane.buf].buftype = 'nofile'
-  vim.bo[pane.buf].bufhidden = 'wipe'
-  vim.bo[pane.buf].swapfile = false
+  local s = sessions[tab] or {}
+  sessions[tab] = s
+  s.win = vim.api.nvim_get_current_win()
+  s.buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_win_set_buf(s.win, s.buf)
+  vim.wo[s.win].number = false
+  vim.wo[s.win].relativenumber = false
+  vim.wo[s.win].signcolumn = 'no'
+  vim.bo[s.buf].buftype = 'nofile'
+  vim.bo[s.buf].bufhidden = 'wipe'
+  vim.bo[s.buf].swapfile = false
   vim.api.nvim_set_current_win(prev)
   restore_views(views)
-  M.refresh()
+  M.refresh(tab)
 end
 
-function M.close()
-  if not M.is_open() then
+function M.close(tab)
+  tab = tab or vim.api.nvim_get_current_tabpage()
+  if not M.is_open(tab) then
     return
   end
+  local s = sessions[tab]
   local views = snapshot_views()
-  vim.api.nvim_win_close(pane.win, true)
-  pane.win, pane.buf = nil, nil
+  vim.api.nvim_win_close(s.win, true)
+  s.win, s.buf = nil, nil
   restore_views(views)
 end
 
-function M.toggle()
-  if M.is_open() then
-    M.close()
+function M.toggle(tab)
+  tab = tab or vim.api.nvim_get_current_tabpage()
+  if M.is_open(tab) then
+    M.close(tab)
   else
-    M.open()
+    M.open(tab)
   end
 end
 
@@ -214,23 +232,56 @@ local function setup_keymaps()
   end
 end
 
-local group
+-- Re-register the cursor-follower autocmds against this tab's *current* diff
+-- buffers -- called on every DiffviewDiffBufWinEnter (i.e. every file switch),
+-- since the buffers backing the diff windows change with the file. Scoped
+-- with `buffer =` so a cursor move in another tab's diff windows (or in this
+-- tab's pane buffer) never triggers this session's refresh. Uses its own
+-- augroup, cleared on each call, so switching files repeatedly doesn't pile
+-- up duplicate autocmds for buffers this session no longer shows.
+local function register_cursor_autocmds(tab)
+  local cursor_group = vim.api.nvim_create_augroup('AdoPrThreadViewCursor' .. tostring(tab), { clear = true })
+  local state = diffview_state.current()
+  if not state then
+    return
+  end
+  for _, sym in ipairs({ 'a', 'b' }) do
+    local win = state.windows[sym]
+    if win and win.bufnr then
+      vim.api.nvim_create_autocmd({ 'CursorMoved', 'WinEnter' }, {
+        group = cursor_group,
+        buffer = win.bufnr,
+        callback = function()
+          M.refresh(tab)
+        end,
+      })
+    end
+  end
+end
 
 -- Wire diffview's events (buffer-enter for file switches, view-closed for
 -- teardown) and open the pane. Mirrors signs.attach()'s event set.
+--
+-- One session per tabpage: `group` is suffixed by tab ID so a second
+-- concurrent session's attach() (another tab) clears only its own augroup,
+-- never a prior session's. DiffviewViewClosed is a global `User` event with
+-- no per-view payload (verified against diffview.nvim's source: it is fired
+-- via a bare `nvim_exec_autocmds("User", { pattern = ... })`), but diffview
+-- closes the view's tabpage (`tabclose`) *before* emitting the event -- so by
+-- the time every session's handler runs, only the session whose own tab just
+-- disappeared sees its captured tab ID go invalid; every other session's
+-- handler sees its own tab still valid and does nothing.
 function M.attach()
-  group = vim.api.nvim_create_augroup('AdoPrThreadView', { clear = true })
+  local tab = vim.api.nvim_get_current_tabpage()
+  local group = vim.api.nvim_create_augroup('AdoPrThreadView' .. tostring(tab), { clear = true })
   vim.api.nvim_create_autocmd('User', {
     group = group,
     pattern = { 'DiffviewDiffBufWinEnter', 'DiffviewViewOpened' },
     callback = vim.schedule_wrap(function()
       setup_keymaps()
-      M.refresh()
+      register_cursor_autocmds(tab)
+      M.refresh(tab)
     end),
-  })
-  vim.api.nvim_create_autocmd({ 'CursorMoved', 'WinEnter' }, {
-    group = group,
-    callback = M.refresh,
   })
   vim.api.nvim_create_autocmd('User', {
     group = group,
@@ -238,13 +289,16 @@ function M.attach()
     -- Deferred a tick for the same reason signs.lua defers its teardown:
     -- deleting the augroup from inside its own callback errors.
     callback = vim.schedule_wrap(function()
-      M.close()
-      vim.api.nvim_del_augroup_by_id(group)
-      group = nil
+      if vim.api.nvim_tabpage_is_valid(tab) then
+        return -- a different session's view closed, not this tab's
+      end
+      sessions[tab] = nil
+      pcall(vim.api.nvim_del_augroup_by_id, group)
+      pcall(vim.api.nvim_del_augroup_by_name, 'AdoPrThreadViewCursor' .. tostring(tab))
     end),
   })
   setup_keymaps()
-  M.open()
+  M.open(tab)
 end
 
 return M
