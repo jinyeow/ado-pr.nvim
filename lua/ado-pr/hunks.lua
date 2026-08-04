@@ -27,7 +27,7 @@ local M = {}
 function M.old_line_to_row(hunks, old_line)
   local shift = 0
   for _, h in ipairs(hunks or {}) do
-    if old_line < h.old_start then
+    if old_line < h.old_start + (h.old_count == 0 and 1 or 0) then
       return old_line + shift, true
     end
     if old_line < h.old_start + h.old_count then
