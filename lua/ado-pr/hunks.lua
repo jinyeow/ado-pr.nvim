@@ -45,9 +45,7 @@ end
 -- as 0, not confused with an omitted count.
 function M.parse_unified_hunks(diff_text)
   local result = {}
-  for old_start, old_count, new_start, new_count in
-    (diff_text or ''):gmatch('@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@')
-  do
+  for old_start, old_count, new_start, new_count in (diff_text or ''):gmatch('@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@') do
     table.insert(result, {
       old_start = tonumber(old_start),
       old_count = old_count ~= '' and tonumber(old_count) or 1,

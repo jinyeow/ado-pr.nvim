@@ -50,11 +50,7 @@ function M.current()
   end
 
   local hunks
-  if
-    (cur_layout.name == 'diff1_inline' or cur_layout.name == 'diff1_inline_pinned')
-    and windows.b
-    and windows.b.bufnr
-  then
+  if (cur_layout.name == 'diff1_inline' or cur_layout.name == 'diff1_inline_pinned') and windows.b and windows.b.bufnr then
     local ok, inline_diff = pcall(require, 'diffview.scene.inline_diff')
     if ok then
       hunks = inline_diff.get_hunks(windows.b.bufnr)
