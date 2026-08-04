@@ -109,13 +109,7 @@ function M.open(id)
   end
   local not_showable = signs.not_showable_count()
   if not_showable > 0 then
-    vim.notify(
-      ('ado-pr: %d left-side thread%s not showable in this layout'):format(
-        not_showable,
-        not_showable == 1 and '' or 's'
-      ),
-      vim.log.levels.INFO
-    )
+    vim.notify(('ado-pr: %d left-side thread%s not showable in this layout'):format(not_showable, not_showable == 1 and '' or 's'), vim.log.levels.INFO)
   end
 end
 
