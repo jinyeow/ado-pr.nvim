@@ -5,6 +5,7 @@ local M = {}
 local az = require('ado-pr.az')
 local anchor = require('ado-pr.anchor')
 local config = require('ado-pr.config')
+local signs = require('ado-pr.signs')
 local state = require('ado-pr.state')
 
 -- Record the active-PR context so :AdoPrComment knows which PR/repo to post to.
@@ -93,6 +94,22 @@ function M.open(id)
   -- Only now that the diff has actually opened does the active-PR state
   -- (which :AdoPrComment relies on) switch to this PR.
   capture_context(id, pr)
+
+  local list, terr = az.list_threads(state.get())
+  if not list then
+    vim.notify('ado-pr: could not load PR comment threads: ' .. (terr or 'unknown error'), vim.log.levels.WARN)
+    list = {}
+  end
+  signs.set_threads(list)
+  signs.attach()
+  signs.refresh()
+  local pr_level = signs.pr_level_count()
+  if pr_level > 0 then
+    vim.notify(
+      ('ado-pr: %d PR-level thread%s'):format(pr_level, pr_level == 1 and '' or 's'),
+      vim.log.levels.INFO
+    )
+  end
 end
 
 -- Post an inline comment thread on the line under the cursor in the diff.
