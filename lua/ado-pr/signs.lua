@@ -1,20 +1,29 @@
 -- Bespoke sign adapter placing Azure DevOps PR comment thread markers in diffview's
--- right-side (new-file) buffer. Extmarks in a plugin-owned namespace, never
--- `vim.diagnostic` -- PR comments must stay out of diagnostic counts, the quickfix list,
--- and diagnostic-counting statuslines.
+-- diff buffers. Extmarks in a plugin-owned namespace, never `vim.diagnostic` -- PR
+-- comments must stay out of diagnostic counts, the quickfix list, and diagnostic-counting
+-- statuslines.
 --
 -- Right-side placement is the one rule that holds across every diffview layout: buffer row
 -- == new-file line, true in the two-window layouts and equally in diff1_plain/diff1_raw/
--- diff1_inline (the inline renderer never mutates the new-side buffer). Left-side anchors
--- are out of scope for this slice (docs/design/pr-comment-threads.md).
+-- diff1_inline (the inline renderer never mutates the new-side buffer).
 --
--- Untested: thin glue over diffview internals and Neovim's window/buffer API with no seam
--- worth mocking (same call as anchor.lua's M.current / diffview_state.lua), validated by
--- smoke test against a live PR. Filtering and range math live in threads.lua, tested there.
+-- Left-side placement (docs/specs/left-side-thread-anchoring.md) has no such shortcut:
+-- two-window layouts sign the old-side window directly, but the single-window layouts have
+-- no old-side buffer at all. diff1_inline maps an old line through its hunk table to either
+-- a real unchanged-region row or the row its virtual deletion lines hang from; diff1_plain/
+-- diff1_raw do the same offset mapping but have no anchor for a genuine deletion, so those
+-- threads count toward M.not_showable_count() instead of guessing a row.
+--
+-- Untested: thin glue over diffview internals, git and Neovim's window/buffer API with no
+-- seam worth mocking (same call as anchor.lua's M.current / diffview_state.lua), validated
+-- by smoke test against a live PR. Filtering, range math and the hunk mapping live in
+-- threads.lua / hunks.lua, tested there.
 local M = {}
 
 local threads_mod = require('ado-pr.threads')
 local diffview_state = require('ado-pr.diffview_state')
+local hunks_mod = require('ado-pr.hunks')
+local state_mod = require('ado-pr.state')
 
 local ns = vim.api.nvim_create_namespace('ado_pr_threads')
 
@@ -22,15 +31,27 @@ local START_SIGN = { active = '●', resolved = '○' }
 local HL = { active = 'DiagnosticSignInfo', resolved = 'Comment' }
 local RANGE_SIGN = '│'
 
+-- diff1_inline always has a real buffer row to sign, even for a pure deletion (the row
+-- its virtual deletion lines hang from). diff1_plain/diff1_raw do not.
+local INLINE_LAYOUTS = { diff1_inline = true, diff1_inline_pinned = true }
+
 -- { { thread = <thread>, path = <repo-relative, forward-slash>, range = { side, line_start, line_end } } }
 local signed = {}
 local pr_level = 0
+local not_showable = 0
+-- Every buffer M.refresh() marked extmarks in last call, so a layout switch clears them
+-- even when the new layout no longer signs into that buffer/window at all.
+local marked_bufs = {}
+-- Self-computed diff1_plain/diff1_raw hunk table, keyed by path -- git-diff is only
+-- re-run when the file under the cursor changes, not on every WinEnter refresh.
+local plain_hunks_cache
 
 -- Store the renderable threads for the active PR (a plain fetch -- no iteration window).
--- Right-side anchored threads are kept for signing; PR-level (no threadContext) human
--- threads are counted, not signed. Left-side threads are dropped for this slice.
+-- Both left- and right-anchored threads are kept for signing; PR-level (no threadContext)
+-- human threads are counted, not signed.
 function M.set_threads(threads)
   signed, pr_level = {}, 0
+  plain_hunks_cache = nil
   for _, t in ipairs(threads or {}) do
     if threads_mod.is_renderable(t) then
       local path = threads_mod.path(t)
@@ -38,7 +59,7 @@ function M.set_threads(threads)
         pr_level = pr_level + 1
       else
         local range = threads_mod.resolve(t, nil)
-        if range and range.side == 'right' then
+        if range then
           table.insert(signed, { thread = t, path = threads_mod.norm_repo_path(path), range = range })
         end
       end
@@ -52,23 +73,85 @@ function M.pr_level_count()
   return pr_level
 end
 
-local function place(buf, line_count, range, thread)
-  local clamped = threads_mod.clamp(range, line_count)
-  if clamped.line_start == 0 then
-    return
-  end
+-- Left-side threads whose position has no real row in the current single-window layout
+-- (diff1_plain/diff1_raw, a line inside a genuine deletion) -- surfaced as a count, never
+-- a guessed position. Reset on every M.refresh() call, so it reflects the file/layout
+-- under the cursor now.
+function M.not_showable_count()
+  return not_showable
+end
+
+-- Mark `lines` (explicit buffer rows, not necessarily contiguous -- several old lines can
+-- collapse onto the same anchor row) in `buf`. Duplicate rows mark once; the first
+-- surviving row gets the start glyph, the rest the range glyph.
+local function place(buf, line_count, lines, thread)
   local kind = threads_mod.is_resolved(thread) and 'resolved' or 'active'
   local hl = HL[kind]
-  local function mark(line, text)
-    vim.api.nvim_buf_set_extmark(buf, ns, line - 1, 0, {
-      sign_text = text,
-      sign_hl_group = hl,
-    })
+  local seen = {}
+  local marked_any = false
+  for _, line in ipairs(lines) do
+    local clamped = threads_mod.clamp({ line_start = line, line_end = line }, line_count)
+    local l = clamped.line_start
+    if l ~= 0 and not seen[l] then
+      seen[l] = true
+      vim.api.nvim_buf_set_extmark(buf, ns, l - 1, 0, {
+        sign_text = marked_any and RANGE_SIGN or START_SIGN[kind],
+        sign_hl_group = hl,
+      })
+      marked_any = true
+    end
   end
-  mark(clamped.line_start, START_SIGN[kind])
-  for line = clamped.line_start + 1, clamped.line_end do
-    mark(line, RANGE_SIGN)
+  if marked_any then
+    marked_bufs[buf] = true
   end
+end
+
+local function range_lines(range)
+  local lines = {}
+  for line = range.line_start, range.line_end do
+    table.insert(lines, line)
+  end
+  return lines
+end
+
+-- Self-computed hunk table for diff1_plain/diff1_raw, which attach no diffview diff
+-- renderer to read one from. `git diff <base>...HEAD -- <path>` is the exact range
+-- review.lua already opened diffview against.
+local function plain_hunks_for(entry_path)
+  if plain_hunks_cache and plain_hunks_cache.path == entry_path then
+    return plain_hunks_cache.hunks
+  end
+  local result_hunks = {}
+  local ctx = state_mod.get()
+  if ctx and ctx.base then
+    local res = vim.system({ 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = vim.fn.getcwd() }):wait()
+    if res.code == 0 then
+      result_hunks = hunks_mod.parse_unified_hunks(res.stdout or '')
+    end
+  end
+  plain_hunks_cache = { path = entry_path, hunks = result_hunks }
+  return result_hunks
+end
+
+-- Map a left-side thread's range through the hunk table for single-window layouts.
+-- diff1_inline always has a real row to sign (the row a pure deletion's virtual lines
+-- hang from); diff1_plain/diff1_raw do not, and a range that maps to zero exact rows
+-- counts toward M.not_showable_count() instead of being marked anywhere.
+local function left_single_window_lines(layout, hunks, range)
+  local lines = {}
+  local any_unshowable = false
+  for line = range.line_start, range.line_end do
+    local row, exact = hunks_mod.old_line_to_row(hunks, line)
+    if exact or INLINE_LAYOUTS[layout] then
+      table.insert(lines, row)
+    else
+      any_unshowable = true
+    end
+  end
+  if #lines == 0 and any_unshowable then
+    not_showable = not_showable + 1
+  end
+  return lines
 end
 
 -- Signed items (thread + resolved range) for one repo-relative path, normalised.
@@ -84,25 +167,56 @@ function M.items_for(path)
   return out
 end
 
--- Re-render signs in diffview's current right-side buffer for the file under the cursor.
--- A multi-line thread is marked across its whole span, not only at its first line. Threads
--- on files outside the current diff scope are skipped by the path match below. Safe to call
--- with no active diffview view (no-op).
+-- Re-render signs in diffview's current diff buffer(s) for the file under the cursor. A
+-- multi-line thread is marked across its whole span, not only at its first line. Threads
+-- on files outside the current diff scope are skipped by the path match below. Every
+-- buffer marked by a previous call is cleared first, so switching layouts re-derives
+-- placement from scratch rather than leaving stale marks in a buffer the new layout no
+-- longer signs into. Safe to call with no active diffview view (no-op).
 function M.refresh()
+  for buf in pairs(marked_bufs) do
+    if vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+    end
+  end
+  marked_bufs = {}
+  not_showable = 0
+
   local state = diffview_state.current()
   if not state then
     return
   end
-  local win = state.windows.b
-  if not (win and win.bufnr) then
+  local win_b = state.windows.b
+  if not (win_b and win_b.bufnr) then
     return
   end
-  vim.api.nvim_buf_clear_namespace(win.bufnr, ns, 0, -1)
+  local win_a = state.windows.a
+  local two_window = win_a and win_a.bufnr
 
   local entry_path = threads_mod.norm_repo_path(state.entry.path)
-  local line_count = vim.api.nvim_buf_line_count(win.bufnr)
+  local line_count_b = vim.api.nvim_buf_line_count(win_b.bufnr)
+  local line_count_a = two_window and vim.api.nvim_buf_line_count(win_a.bufnr)
+
+  -- diffview only computes a hunk table for inline layouts, and even there it can come
+  -- back nil (no bufnr yet, or diffview.scene.inline_diff unavailable -- see
+  -- diffview_state_spec.lua cases 9/10). Any single-window layout without one self-
+  -- computes from git, so a left-side line is never identity-mapped by omission.
+  local hunks
+  if not two_window then
+    hunks = state.hunks or plain_hunks_for(entry_path)
+  end
+
   for _, item in ipairs(M.items_for(entry_path)) do
-    place(win.bufnr, line_count, item.range, item.thread)
+    if item.range.side == 'right' then
+      place(win_b.bufnr, line_count_b, range_lines(item.range), item.thread)
+    elseif two_window then
+      place(win_a.bufnr, line_count_a, range_lines(item.range), item.thread)
+    else
+      local lines = left_single_window_lines(state.layout, hunks, item.range)
+      if #lines > 0 then
+        place(win_b.bufnr, line_count_b, lines, item.thread)
+      end
+    end
   end
 end
 
