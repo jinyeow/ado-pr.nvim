@@ -103,6 +103,18 @@ local function restore_system()
   vim.system = real_system
 end
 
+local real_notify = vim.notify
+local notifications
+local function stub_notify()
+  notifications = {}
+  vim.notify = function(msg, level)
+    table.insert(notifications, { msg = msg, level = level })
+  end
+end
+local function restore_notify()
+  vim.notify = real_notify
+end
+
 -- ---------------------------------------------------------------------------
 -- M.plan -- pure placement plan
 -- ---------------------------------------------------------------------------
@@ -168,6 +180,18 @@ for _, layout in ipairs({ 'diff1_plain', 'diff1_raw' }) do
   eq(result.placements, {}, layout .. ': pure deletion yields zero placements')
 end
 
+-- nil hunks in a single-window layout means "unresolved" (git-diff computation failed or
+-- was never attempted), not "no hunks" -- every left-side item on entry_path is
+-- not_showable, never identity-mapped onto the wrong row.
+for _, layout in ipairs({ 'diff1_plain', 'diff1_raw', 'diff1_inline' }) do
+  local signed_items = {
+    { thread = { status = 'active' }, path = 'f.lua', range = { side = 'left', line_start = 5, line_end = 6 } },
+  }
+  local result = signs.plan(layout, nil, signed_items, 'f.lua', { b = 50 })
+  eq(result.not_showable, 1, layout .. ': nil hunks counts as not_showable, not identity-mapped')
+  eq(result.placements, {}, layout .. ': nil hunks yields zero placements')
+end
+
 -- Items on a different path than entry_path are ignored entirely.
 do
   local signed_items = {
@@ -224,7 +248,7 @@ end
 -- hunk increments not_showable_count() instead of being placed.
 do
   state.clear()
-  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef' })
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
   local buf_b = make_buf(50)
   current_snapshot = {
     entry = { path = 'plain.lua' },
@@ -242,6 +266,31 @@ do
   ok(#system_calls == 1, 'refresh diff1_plain: git diff invoked once', #system_calls)
   local call = system_calls[1]
   eq(call.cmd, { 'git', 'diff', 'deadbeef...HEAD', '--', 'plain.lua' }, 'refresh diff1_plain: git diff argv')
+  -- git runs against the stored review root, not vim.fn.getcwd() -- the review root
+  -- ('/review-root') never matches the test process's real cwd.
+  ok(call.opts and call.opts.cwd == '/review-root', 'refresh diff1_plain: git diff cwd is the stored repo_root', vim.inspect(call.opts))
+  ok(call.opts and call.opts.cwd ~= vim.fn.getcwd(), 'refresh diff1_plain: git diff cwd differs from getcwd()')
+  restore_system()
+end
+
+-- code == 0 with empty stdout is a legitimate "no changes" result: {} is cached and
+-- identity mapping applies (a left-side line outside any hunk maps to its own row).
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'unchanged.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  system_result = { code = 0, stdout = '', stderr = '' }
+  signs.set_threads({ make_thread('unchanged.lua', 'left', 5, 5, 'active') })
+  signs.refresh()
+  eq(marked_rows(buf_b), { 5 }, 'refresh diff1_plain empty stdout: identity-mapped to its own row')
+  eq(signs.not_showable_count(), 0, 'refresh diff1_plain empty stdout: not_showable 0')
   restore_system()
 end
 
@@ -249,7 +298,7 @@ end
 -- the self-computed hunk table is cached per path, not re-derived on every WinEnter.
 do
   state.clear()
-  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef' })
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
   local buf_b = make_buf(50)
   current_snapshot = {
     entry = { path = 'cache.lua' },
@@ -266,11 +315,13 @@ do
   restore_system()
 end
 
--- Git failure (non-zero exit): refresh does not crash and the path's cache still holds
--- (an empty hunk table), and a later refresh for an unrelated layout/path is unaffected.
+-- Git failure (non-zero exit): refresh does not crash, nothing is cached (so a nil result
+-- is never mistaken for a legitimate empty hunk table / identity mapping), the thread is
+-- not placed, not_showable is incremented, and the user is notified once with the
+-- git stderr. A later refresh retries git rather than reusing a cached failure.
 do
   state.clear()
-  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef' })
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
   local buf_fail = make_buf(50)
   current_snapshot = {
     entry = { path = 'fails.lua' },
@@ -279,11 +330,24 @@ do
     hunks = nil,
   }
   stub_system()
+  stub_notify()
   system_result = { code = 1, stdout = '', stderr = 'boom' }
   signs.set_threads({ make_thread('fails.lua', 'left', 5, 5, 'active') })
   local call_ok, err = pcall(signs.refresh)
   ok(call_ok, 'git failure: refresh does not crash', err)
+  eq(marked_rows(buf_fail), {}, 'git failure: thread not placed')
+  eq(signs.not_showable_count(), 1, 'git failure: not_showable incremented')
+  ok(#notifications == 1, 'git failure: notified exactly once', #notifications)
+  local n = notifications[1]
+  ok(n and n.level == vim.log.levels.WARN, 'git failure: notification is WARN')
+  ok(n and n.msg:find('boom', 1, true) ~= nil, 'git failure: notification includes git stderr', n and n.msg)
+
+  -- A second refresh on the same failing path re-runs git (failure was never cached).
+  signs.refresh()
+  ok(#system_calls == 2, 'git failure: not cached, second refresh re-invokes git', #system_calls)
+  ok(#notifications == 2, 'git failure: notified again on retry', #notifications)
   restore_system()
+  restore_notify()
 
   -- A subsequent refresh for a different layout/path is unaffected by the failure.
   local buf_a2, buf_b2 = make_buf(50), make_buf(50)
@@ -297,6 +361,52 @@ do
   signs.refresh()
   eq(marked_rows(buf_b2), { 7 }, 'git failure: unrelated later layout still places correctly')
   eq(signs.not_showable_count(), 0, 'git failure: not_showable reset for the unrelated refresh')
+end
+
+-- No ctx / no ctx.base: plain_hunks_for cannot run git at all -- nil hunks, not_showable
+-- incremented, no vim.system call, and (matching M.refresh's own notify guard) no
+-- notification since there is no git stderr to report.
+do
+  state.clear() -- no active PR context
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'noctx.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  stub_notify()
+  signs.set_threads({ make_thread('noctx.lua', 'left', 5, 5, 'active') })
+  signs.refresh()
+  eq(marked_rows(buf_b), {}, 'no ctx: thread not placed')
+  eq(signs.not_showable_count(), 1, 'no ctx: not_showable incremented')
+  eq(#system_calls, 0, 'no ctx: git never invoked')
+  eq(#notifications, 0, 'no ctx: no notification (nothing failed, just unavailable)')
+  restore_system()
+  restore_notify()
+end
+
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p' }) -- no base
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'nobase.lua' },
+    layout = 'diff1_raw',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  stub_notify()
+  signs.set_threads({ make_thread('nobase.lua', 'left', 5, 5, 'active') })
+  signs.refresh()
+  eq(marked_rows(buf_b), {}, 'no base: thread not placed')
+  eq(signs.not_showable_count(), 1, 'no base: not_showable incremented')
+  eq(#system_calls, 0, 'no base: git never invoked')
+  eq(#notifications, 0, 'no base: no notification')
+  restore_system()
+  restore_notify()
 end
 
 -- Cleanup: refresh after a layout switch clears extmarks from buffers the previous layout

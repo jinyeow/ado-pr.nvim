@@ -124,19 +124,30 @@ end
 
 -- Self-computed hunk table for diff1_plain/diff1_raw, which attach no diffview diff
 -- renderer to read one from. `git diff <base>...HEAD -- <path>` is the exact range
--- review.lua already opened diffview against.
+-- review.lua already opened diffview against, run against the review root captured at
+-- open (never `vim.fn.getcwd()`, which can differ by refresh time).
+--
+-- Returns hunks, err. Only a `code == 0` result -- including a legitimately empty parse
+-- for an unchanged file -- is cached and returned as a table; no ctx, no `ctx.base`, or a
+-- non-zero exit all return `nil` and write nothing to the cache, so the failure is neither
+-- mistaken for "no changes" (identity mapping) nor remembered past this refresh -- the
+-- next refresh naturally retries.
 local function plain_hunks_for(entry_path)
   if plain_hunks_cache and plain_hunks_cache.path == entry_path then
     return plain_hunks_cache.hunks
   end
-  local result_hunks = {}
   local ctx = state_mod.get()
-  if ctx and ctx.base then
-    local res = vim.system({ 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = vim.fn.getcwd() }):wait()
-    if res.code == 0 then
-      result_hunks = hunks_mod.parse_unified_hunks(res.stdout or '')
-    end
+  if not (ctx and ctx.base) then
+    return nil
   end
+  local res = vim.system(
+    { 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path },
+    { text = true, cwd = ctx.repo_root }
+  ):wait()
+  if res.code ~= 0 then
+    return nil, res.stderr
+  end
+  local result_hunks = hunks_mod.parse_unified_hunks(res.stdout or '')
   plain_hunks_cache = { path = entry_path, hunks = result_hunks }
   return result_hunks
 end
@@ -145,7 +156,15 @@ end
 -- diff1_inline always has a real row to sign (the row a pure deletion's virtual lines
 -- hang from); diff1_plain/diff1_raw do not, and a range that maps to zero exact rows
 -- is unshowable rather than being placed at a guessed row.
+--
+-- `hunks == nil` means the hunk table is unresolved (git-diff failed or was never
+-- attempted), not "no hunks in this file" -- treated as fully unshowable rather than
+-- falling through to identity mapping (an empty table `{}` is the legitimate "no
+-- changes" case and still maps identically).
 local function left_single_window_lines(layout, hunks, range)
+  if hunks == nil then
+    return {}, true
+  end
   local lines = {}
   local any_unshowable = false
   for line = range.line_start, range.line_end do
@@ -253,10 +272,15 @@ function M.refresh()
   -- diffview only computes a hunk table for inline layouts, and even there it can come
   -- back nil (no bufnr yet, or diffview.scene.inline_diff unavailable -- see
   -- diffview_state_spec.lua cases 9/10). Any single-window layout without one self-
-  -- computes from git, so a left-side line is never identity-mapped by omission.
-  local hunks
+  -- computes from git. A `nil` result (no ctx/base, or a failed `git diff`) stays `nil`
+  -- here too -- M.plan treats that as unresolved and counts affected threads toward
+  -- not_showable, never identity-mapping a left-side line by omission.
+  local hunks, hunks_err
   if not two_window then
-    hunks = state.hunks or plain_hunks_for(entry_path)
+    hunks = state.hunks
+    if not hunks then
+      hunks, hunks_err = plain_hunks_for(entry_path)
+    end
   end
 
   local result = M.plan(state.layout, hunks, signed, entry_path, line_counts)
@@ -264,6 +288,15 @@ function M.refresh()
   for _, p in ipairs(result.placements) do
     local win = p.target == 'a' and win_a or win_b
     place(win.bufnr, p.lines, p.kind)
+  end
+
+  -- Only a real git failure (stderr present) is worth interrupting the user for -- no
+  -- ctx/base is an ordinary "not reviewing a PR yet" state, not a failure.
+  if hunks_err then
+    vim.notify(
+      ('ado-pr: git diff failed for %s: %s'):format(entry_path, hunks_err),
+      vim.log.levels.WARN
+    )
   end
 end
 

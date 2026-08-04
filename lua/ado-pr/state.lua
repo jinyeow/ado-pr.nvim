@@ -16,6 +16,10 @@ local M = {}
 ---                            table for diff1_plain/diff1_raw (left-side-thread-
 ---                            anchoring.md), which have no diffview diff renderer to read
 ---                            one from.
+---@field repo_root string|nil the review worktree's cwd, captured once by review.open --
+---                            signs.lua's self-computed `git diff` must run against this,
+---                            never `vim.fn.getcwd()` at refresh time (the cursor may have
+---                            moved windows/tabs by then).
 
 ---@type AdoPrContext|nil
 local current = nil
