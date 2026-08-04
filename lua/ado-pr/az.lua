@@ -159,4 +159,63 @@ function M.post_thread(ctx, anchor, content)
   return decoded.id, nil
 end
 
+-- Shared decoder: `az devops invoke` on a list resource returns
+-- { count, value = { ...items... } }; unwrap to the array. A response missing
+-- `value` (or with `value` not an array/table) does not match that envelope --
+-- raise rather than silently treating a real transport/schema failure as "no
+-- comments". `{ count = 0, value = {} }` (a PR with zero threads) is a valid
+-- envelope and still decodes to an empty list. Returns (threads|nil, err|nil).
+local function decode_threads(decoded, err)
+  if not decoded then
+    return nil, err
+  end
+  if type(decoded) ~= 'table' or type(decoded.value) ~= 'table' then
+    return nil, 'malformed thread response: expected { count, value = {...} } envelope, got ' .. vim.inspect(decoded)
+  end
+  return decoded.value, nil
+end
+
+-- Plain thread list: no trackingCriteria on any thread (ADR-0002). Same
+-- `az devops invoke` transport and `az login` session as post_thread -- no new
+-- token, no stored secret.
+function M.list_threads(ctx)
+  local args = {
+    'devops', 'invoke',
+    '--area', 'git', '--resource', 'pullRequestThreads',
+    '--http-method', 'GET',
+    '--route-parameters',
+    'project=' .. ctx.project,
+    'repositoryId=' .. ctx.repositoryId,
+    'pullRequestId=' .. tostring(ctx.id),
+    '--api-version', config.get().api_version,
+    '--output', 'json',
+  }
+  vim.list_extend(args, org_args())
+  return decode_threads(az_json(args))
+end
+
+-- Thread list fetched under an iteration window: `$iteration`/`$baseIteration`
+-- query parameters make ADO include `trackingCriteria` on threads it can track
+-- (ADR-0002) and re-anchor `threadContext` to that window's side. Deliberately a
+-- separate function from list_threads, not a mode switch: the two calls return
+-- materially different data and serve different features.
+function M.list_threads_tracked(ctx, iteration, base_iteration)
+  local args = {
+    'devops', 'invoke',
+    '--area', 'git', '--resource', 'pullRequestThreads',
+    '--http-method', 'GET',
+    '--route-parameters',
+    'project=' .. ctx.project,
+    'repositoryId=' .. ctx.repositoryId,
+    'pullRequestId=' .. tostring(ctx.id),
+    '--query-parameters',
+    '$iteration=' .. tostring(iteration),
+    '$baseIteration=' .. tostring(base_iteration),
+    '--api-version', config.get().api_version,
+    '--output', 'json',
+  }
+  vim.list_extend(args, org_args())
+  return decode_threads(az_json(args))
+end
+
 return M
