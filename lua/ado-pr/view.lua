@@ -165,6 +165,7 @@ function M.jump(delta)
     return
   end
   local win = state.windows.b.winid
+  local bufnr = state.windows.b.bufnr
   local ordered = threads_mod.ordered(signs.items_for(threads_mod.norm_repo_path(state.entry.path)))
   if #ordered == 0 then
     return
@@ -188,7 +189,15 @@ function M.jump(delta)
     end
     target = target or ordered[#ordered]
   end
-  vim.api.nvim_win_set_cursor(win, { target.range.line_start, 0 })
+  -- Same guard signs.lua's place() uses: a thread's range can outlive the buffer it
+  -- was written against (stale iteration range), so clamp before touching the cursor
+  -- rather than letting nvim_win_set_cursor error on an out-of-bounds row. A
+  -- zero-line buffer clamps to the empty-buffer sentinel (line 0) -- skip the jump.
+  local clamped = threads_mod.clamp(target.range, vim.api.nvim_buf_line_count(bufnr))
+  if clamped.line_start == 0 then
+    return
+  end
+  vim.api.nvim_win_set_cursor(win, { clamped.line_start, 0 })
 end
 
 -- Buffer-local, user-configurable maps on diffview's diff windows (both sides,
