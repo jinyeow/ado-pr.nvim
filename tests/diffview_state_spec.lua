@@ -13,7 +13,9 @@ package.path = './lua/?.lua;./lua/?/init.lua;' .. package.path
 
 local current_view = nil
 package.loaded['diffview.lib'] = {
-  get_current_view = function() return current_view end,
+  get_current_view = function()
+    return current_view
+  end,
 }
 
 local diffview_state = require('ado-pr.diffview_state')
@@ -67,10 +69,7 @@ end
 
 -- 3: diff1_plain-shaped layout, symbols = {'b'} only.
 do
-  set_view(
-    { path = 'src/foo.lua', oldpath = nil, status = 'M' },
-    { name = 'diff1_plain', symbols = { 'b' }, b = { id = 2001, file = { bufnr = 10 } } }
-  )
+  set_view({ path = 'src/foo.lua', oldpath = nil, status = 'M' }, { name = 'diff1_plain', symbols = { 'b' }, b = { id = 2001, file = { bufnr = 10 } } })
   local snap, err = diffview_state.current()
   ok(snap and not err, 'case3: no error', err)
   eq(snap.windows, { b = { winid = 2001, bufnr = 10 } }, 'case3: windows')
@@ -81,15 +80,12 @@ end
 
 -- 4: diff2_horizontal-shaped layout, both a and b present.
 do
-  set_view(
-    { path = 'src/bar.lua', oldpath = 'src/old_bar.lua', status = 'R' },
-    {
-      name = 'diff2_horizontal',
-      symbols = { 'a', 'b' },
-      a = { id = 3001, file = { bufnr = 20 } },
-      b = { id = 3002, file = { bufnr = 21 } },
-    }
-  )
+  set_view({ path = 'src/bar.lua', oldpath = 'src/old_bar.lua', status = 'R' }, {
+    name = 'diff2_horizontal',
+    symbols = { 'a', 'b' },
+    a = { id = 3001, file = { bufnr = 20 } },
+    b = { id = 3002, file = { bufnr = 21 } },
+  })
   local snap, err = diffview_state.current()
   ok(snap and not err, 'case4: no error', err)
   eq(snap.windows, {
@@ -102,29 +98,23 @@ end
 -- 5: a symbol whose window table is nil, or lacks .id, is skipped -- not an
 -- error -- while remaining valid windows still populate.
 do
-  set_view(
-    { path = 'src/baz.lua', oldpath = nil, status = 'M' },
-    {
-      name = 'diff2_horizontal',
-      symbols = { 'a', 'b' },
-      a = nil,
-      b = { id = 4001, file = { bufnr = 30 } },
-    }
-  )
+  set_view({ path = 'src/baz.lua', oldpath = nil, status = 'M' }, {
+    name = 'diff2_horizontal',
+    symbols = { 'a', 'b' },
+    a = nil,
+    b = { id = 4001, file = { bufnr = 30 } },
+  })
   local snap, err = diffview_state.current()
   ok(snap and not err, 'case5a: no error', err)
   ok(snap.windows.a == nil, 'case5a: a skipped (nil window)')
   eq(snap.windows.b, { winid = 4001, bufnr = 30 }, 'case5a: b still populated')
 
-  set_view(
-    { path = 'src/baz.lua', oldpath = nil, status = 'M' },
-    {
-      name = 'diff2_horizontal',
-      symbols = { 'a', 'b' },
-      a = { file = { bufnr = 31 } }, -- no .id
-      b = { id = 4002, file = { bufnr = 32 } },
-    }
-  )
+  set_view({ path = 'src/baz.lua', oldpath = nil, status = 'M' }, {
+    name = 'diff2_horizontal',
+    symbols = { 'a', 'b' },
+    a = { file = { bufnr = 31 } }, -- no .id
+    b = { id = 4002, file = { bufnr = 32 } },
+  })
   snap, err = diffview_state.current()
   ok(snap and not err, 'case5b: no error', err)
   ok(snap.windows.a == nil, 'case5b: a skipped (no id)')
@@ -133,10 +123,7 @@ end
 
 -- 6: a window with .id but no .file -> windows[sym] = { winid = ..., bufnr = nil }.
 do
-  set_view(
-    { path = 'src/qux.lua', oldpath = nil, status = 'A' },
-    { name = 'diff1_plain', symbols = { 'b' }, b = { id = 5001 } }
-  )
+  set_view({ path = 'src/qux.lua', oldpath = nil, status = 'A' }, { name = 'diff1_plain', symbols = { 'b' }, b = { id = 5001 } })
   local snap, err = diffview_state.current()
   ok(snap and not err, 'case6: no error', err)
   eq(snap.windows.b, { winid = 5001, bufnr = nil }, 'case6: bufnr nil, winid set')
@@ -146,10 +133,7 @@ end
 -- the stubbed get_hunks(bufnr) returns, correct bufnr passed through.
 do
   stub_inline_diff({ { old_start = 1, old_count = 1, new_start = 1, new_count = 2 } })
-  set_view(
-    { path = 'src/inl.lua', oldpath = nil, status = 'M' },
-    { name = 'diff1_inline', symbols = { 'b' }, b = { id = 6001, file = { bufnr = 40 } } }
-  )
+  set_view({ path = 'src/inl.lua', oldpath = nil, status = 'M' }, { name = 'diff1_inline', symbols = { 'b' }, b = { id = 6001, file = { bufnr = 40 } } })
   local snap, err = diffview_state.current()
   ok(snap and not err, 'case7: no error', err)
   eq(snap.hunks, { { old_start = 1, old_count = 1, new_start = 1, new_count = 2 } }, 'case7: hunks')
@@ -160,10 +144,7 @@ end
 -- 8: diff1_inline_pinned layout -> same as case 7.
 do
   stub_inline_diff({ { old_start = 5, old_count = 0, new_start = 5, new_count = 1 } })
-  set_view(
-    { path = 'src/pin.lua', oldpath = nil, status = 'M' },
-    { name = 'diff1_inline_pinned', symbols = { 'b' }, b = { id = 6002, file = { bufnr = 41 } } }
-  )
+  set_view({ path = 'src/pin.lua', oldpath = nil, status = 'M' }, { name = 'diff1_inline_pinned', symbols = { 'b' }, b = { id = 6002, file = { bufnr = 41 } } })
   local snap, err = diffview_state.current()
   ok(snap and not err, 'case8: no error', err)
   eq(snap.hunks, { { old_start = 5, old_count = 0, new_start = 5, new_count = 1 } }, 'case8: hunks')
@@ -190,11 +171,10 @@ end
 -- itself fails -> hunks == nil, no error propagates out of M.current().
 do
   clear_inline_diff()
-  package.preload['diffview.scene.inline_diff'] = function() error('boom') end
-  set_view(
-    { path = 'src/failreq.lua', oldpath = nil, status = 'M' },
-    { name = 'diff1_inline', symbols = { 'b' }, b = { id = 6004, file = { bufnr = 42 } } }
-  )
+  package.preload['diffview.scene.inline_diff'] = function()
+    error('boom')
+  end
+  set_view({ path = 'src/failreq.lua', oldpath = nil, status = 'M' }, { name = 'diff1_inline', symbols = { 'b' }, b = { id = 6004, file = { bufnr = 42 } } })
   local snap, err = diffview_state.current()
   ok(snap and not err, 'case10: no error propagates', err)
   ok(snap.hunks == nil, 'case10: no hunks')
@@ -205,15 +185,12 @@ end
 -- bufnr -> hunks == nil always, get_hunks never invoked.
 do
   stub_inline_diff({ { old_start = 1, old_count = 1, new_start = 1, new_count = 1 } })
-  set_view(
-    { path = 'src/horiz.lua', oldpath = nil, status = 'M' },
-    {
-      name = 'diff2_horizontal',
-      symbols = { 'a', 'b' },
-      a = { id = 7001, file = { bufnr = 50 } },
-      b = { id = 7002, file = { bufnr = 51 } },
-    }
-  )
+  set_view({ path = 'src/horiz.lua', oldpath = nil, status = 'M' }, {
+    name = 'diff2_horizontal',
+    symbols = { 'a', 'b' },
+    a = { id = 7001, file = { bufnr = 50 } },
+    b = { id = 7002, file = { bufnr = 51 } },
+  })
   local snap, err = diffview_state.current()
   ok(snap and not err, 'case11: no error', err)
   ok(snap.hunks == nil, 'case11: no hunks')
@@ -224,7 +201,9 @@ end
 -- 12: diffview.lib itself unavailable (require fails) -> nil, 'diffview.nvim is not available'.
 do
   package.loaded['diffview.lib'] = nil
-  package.preload['diffview.lib'] = function() error('boom') end
+  package.preload['diffview.lib'] = function()
+    error('boom')
+  end
   local snap, err = diffview_state.current()
   ok(snap == nil, 'case12: nil snapshot')
   eq(err, 'diffview.nvim is not available', 'case12: error')
@@ -233,7 +212,9 @@ end
 
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
-  for _, f in ipairs(failures) do io.stderr:write('  - ' .. f .. '\n') end
+  for _, f in ipairs(failures) do
+    io.stderr:write('  - ' .. f .. '\n')
+  end
   os.exit(1)
 end
 io.write(('ok  %d assertions\n'):format(count))
