@@ -37,6 +37,16 @@ package.loaded['ado-pr.signs'] = {
   end,
 }
 
+-- ado-pr.view is the same kind of untested adapter (thin glue over diffview/Neovim
+-- internals -- see view.lua's own header); stub it here too so review.open's WIRING
+-- into it is assertable without actually opening a split window per test case.
+local view_calls
+package.loaded['ado-pr.view'] = {
+  attach = function()
+    table.insert(view_calls, { fn = 'attach' })
+  end,
+}
+
 local az = require('ado-pr.az')
 local review = require('ado-pr.review')
 local state = require('ado-pr.state')
@@ -118,6 +128,7 @@ end
 local function reset(opts)
   calls = {}
   signs_calls = {}
+  view_calls = {}
   stub_system()
   stub_cmd()
   stub_notify()
@@ -228,6 +239,14 @@ do
     'happy: set_threads receives the decoded (empty) thread list',
     vim.inspect(signs_calls[1] and signs_calls[1].list)
   )
+
+  -- The follower pane attaches after signs, once threads are wired -- both read the
+  -- same diffview state, so neither has anything to show before the diff is open.
+  local view_fns = {}
+  for _, c in ipairs(view_calls) do
+    table.insert(view_fns, c.fn)
+  end
+  ok(vim.deep_equal(view_fns, { 'attach' }), 'happy: view attached', vim.inspect(view_fns))
 end
 
 -- A show_pr failure aborts: no fetch, no diff, an ERROR notify.

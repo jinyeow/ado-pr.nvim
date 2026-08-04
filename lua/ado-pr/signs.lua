@@ -154,6 +154,19 @@ local function left_single_window_lines(layout, hunks, range)
   return lines
 end
 
+-- Signed items (thread + resolved range) for one repo-relative path, normalised.
+-- The follower pane (view.lua) uses this to find the threads covering the cursor
+-- and to walk between them with ]t / [t.
+function M.items_for(path)
+  local out = {}
+  for _, item in ipairs(signed) do
+    if item.path == path then
+      table.insert(out, item)
+    end
+  end
+  return out
+end
+
 -- Re-render signs in diffview's current diff buffer(s) for the file under the cursor. A
 -- multi-line thread is marked across its whole span, not only at its first line. Threads
 -- on files outside the current diff scope are skipped by the path match below. Every
@@ -193,17 +206,15 @@ function M.refresh()
     hunks = state.hunks or plain_hunks_for(entry_path)
   end
 
-  for _, item in ipairs(signed) do
-    if item.path == entry_path then
-      if item.range.side == 'right' then
-        place(win_b.bufnr, line_count_b, range_lines(item.range), item.thread)
-      elseif two_window then
-        place(win_a.bufnr, line_count_a, range_lines(item.range), item.thread)
-      else
-        local lines = left_single_window_lines(state.layout, hunks, item.range)
-        if #lines > 0 then
-          place(win_b.bufnr, line_count_b, lines, item.thread)
-        end
+  for _, item in ipairs(M.items_for(entry_path)) do
+    if item.range.side == 'right' then
+      place(win_b.bufnr, line_count_b, range_lines(item.range), item.thread)
+    elseif two_window then
+      place(win_a.bufnr, line_count_a, range_lines(item.range), item.thread)
+    else
+      local lines = left_single_window_lines(state.layout, hunks, item.range)
+      if #lines > 0 then
+        place(win_b.bufnr, line_count_b, lines, item.thread)
       end
     end
   end
