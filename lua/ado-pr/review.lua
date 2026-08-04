@@ -41,10 +41,7 @@ local function fetch_target_ref(target_ref, cwd)
     end
     local detail = fetch.stderr ~= '' and fetch.stderr or ('exit ' .. fetch.code)
     if attempt < FETCH_RETRIES then
-      vim.notify(
-        ('ado-pr: git fetch %s failed (attempt %d/%d): %s, retrying'):format(target_ref, attempt, FETCH_RETRIES, detail),
-        vim.log.levels.WARN
-      )
+      vim.notify(('ado-pr: git fetch %s failed (attempt %d/%d): %s, retrying'):format(target_ref, attempt, FETCH_RETRIES, detail), vim.log.levels.WARN)
     end
   end
   return fetch
@@ -108,10 +105,7 @@ function M.open(id)
   signs.refresh()
   local pr_level = signs.pr_level_count()
   if pr_level > 0 then
-    vim.notify(
-      ('ado-pr: %d PR-level thread%s'):format(pr_level, pr_level == 1 and '' or 's'),
-      vim.log.levels.INFO
-    )
+    vim.notify(('ado-pr: %d PR-level thread%s'):format(pr_level, pr_level == 1 and '' or 's'), vim.log.levels.INFO)
   end
   local not_showable = signs.not_showable_count()
   if not_showable > 0 then
