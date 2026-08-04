@@ -370,16 +370,19 @@ do
   package.loaded['diffview'] = saved_diffview
 
   ok(#cmd_calls() == 1, 'diffview unavailable: fugitive fallback still opens', #cmd_calls())
-  local cmd_idx = index_of(function(c) return c.kind == 'cmd' end)
+  local cmd_idx = index_of(function(c)
+    return c.kind == 'cmd'
+  end)
   if cmd_idx then
-    ok(calls[cmd_idx].cmd:match('^Git difftool ') ~= nil,
-      'diffview unavailable: Git difftool fallback used', calls[cmd_idx].cmd)
+    ok(calls[cmd_idx].cmd:match('^Git difftool ') ~= nil, 'diffview unavailable: Git difftool fallback used', calls[cmd_idx].cmd)
   end
   ok(#view_calls == 0, 'diffview unavailable: view.attach not called', vim.inspect(view_calls))
 
   local has_info = false
   for _, n in ipairs(notifications) do
-    if n.level == vim.log.levels.INFO then has_info = true end
+    if n.level == vim.log.levels.INFO then
+      has_info = true
+    end
   end
   ok(has_info, 'diffview unavailable: notifies INFO that the thread pane needs diffview.nvim')
 end
