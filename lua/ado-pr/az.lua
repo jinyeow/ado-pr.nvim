@@ -142,16 +142,24 @@ function M.post_thread(ctx, anchor, content)
   f:close()
 
   local args = {
-    'devops', 'invoke',
-    '--area', 'git', '--resource', 'pullRequestThreads',
-    '--http-method', 'POST',
+    'devops',
+    'invoke',
+    '--area',
+    'git',
+    '--resource',
+    'pullRequestThreads',
+    '--http-method',
+    'POST',
     '--route-parameters',
     'project=' .. ctx.project,
     'repositoryId=' .. ctx.repositoryId,
     'pullRequestId=' .. tostring(ctx.id),
-    '--in-file', tmp,
-    '--api-version', config.get().api_version,
-    '--output', 'json',
+    '--in-file',
+    tmp,
+    '--api-version',
+    config.get().api_version,
+    '--output',
+    'json',
   }
   vim.list_extend(args, org_args())
   local decoded, err = az_json(args)
@@ -183,15 +191,22 @@ end
 -- token, no stored secret.
 function M.list_threads(ctx)
   local args = {
-    'devops', 'invoke',
-    '--area', 'git', '--resource', 'pullRequestThreads',
-    '--http-method', 'GET',
+    'devops',
+    'invoke',
+    '--area',
+    'git',
+    '--resource',
+    'pullRequestThreads',
+    '--http-method',
+    'GET',
     '--route-parameters',
     'project=' .. ctx.project,
     'repositoryId=' .. ctx.repositoryId,
     'pullRequestId=' .. tostring(ctx.id),
-    '--api-version', config.get().api_version,
-    '--output', 'json',
+    '--api-version',
+    config.get().api_version,
+    '--output',
+    'json',
   }
   vim.list_extend(args, org_args())
   return decode_threads(az_json(args))
@@ -204,9 +219,14 @@ end
 -- materially different data and serve different features.
 function M.list_threads_tracked(ctx, iteration, base_iteration)
   local args = {
-    'devops', 'invoke',
-    '--area', 'git', '--resource', 'pullRequestThreads',
-    '--http-method', 'GET',
+    'devops',
+    'invoke',
+    '--area',
+    'git',
+    '--resource',
+    'pullRequestThreads',
+    '--http-method',
+    'GET',
     '--route-parameters',
     'project=' .. ctx.project,
     'repositoryId=' .. ctx.repositoryId,
@@ -214,8 +234,10 @@ function M.list_threads_tracked(ctx, iteration, base_iteration)
     '--query-parameters',
     '$iteration=' .. tostring(iteration),
     '$baseIteration=' .. tostring(base_iteration),
-    '--api-version', config.get().api_version,
-    '--output', 'json',
+    '--api-version',
+    config.get().api_version,
+    '--output',
+    'json',
   }
   vim.list_extend(args, org_args())
   return decode_threads(az_json(args))

@@ -132,10 +132,7 @@ local function plain_hunks_for(entry_path)
   local result_hunks = {}
   local ctx = state_mod.get()
   if ctx and ctx.base then
-    local res = vim.system(
-      { 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path },
-      { text = true, cwd = vim.fn.getcwd() }
-    ):wait()
+    local res = vim.system({ 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = vim.fn.getcwd() }):wait()
     if res.code == 0 then
       result_hunks = hunks_mod.parse_unified_hunks(res.stdout or '')
     end

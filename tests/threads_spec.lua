@@ -388,7 +388,9 @@ end
 
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
-  for _, f in ipairs(failures) do io.stderr:write('  - ' .. f .. '\n') end
+  for _, f in ipairs(failures) do
+    io.stderr:write('  - ' .. f .. '\n')
+  end
   os.exit(1)
 end
 io.write(('ok  %d assertions\n'):format(count))
