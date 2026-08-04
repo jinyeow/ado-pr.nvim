@@ -6,6 +6,7 @@ local az = require('ado-pr.az')
 local anchor = require('ado-pr.anchor')
 local config = require('ado-pr.config')
 local signs = require('ado-pr.signs')
+local view = require('ado-pr.view')
 local state = require('ado-pr.state')
 
 -- Record the active-PR context so :AdoPrComment knows which PR/repo to post to.
@@ -103,6 +104,7 @@ function M.open(id)
   signs.set_threads(list)
   signs.attach()
   signs.refresh()
+  view.attach()
   local pr_level = signs.pr_level_count()
   if pr_level > 0 then
     vim.notify(

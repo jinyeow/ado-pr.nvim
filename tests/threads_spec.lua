@@ -386,6 +386,83 @@ do
   ok(tracked == 3, 'fixture set: 3 of 5 threads carry tracking', tostring(tracked))
 end
 
+-- ---------------------------------------------------------------------------
+-- covering / ordered — the follower pane's overlap-selection and jump order
+-- ---------------------------------------------------------------------------
+
+-- Build the { thread, range } items signs.lua hands the follower pane, reusing
+-- the fixture-shaped set above (97122 62-84 contains 96937 77 and 96938 82-83).
+local items = {}
+for _, t in ipairs(human_threads) do
+  table.insert(items, { thread = t, range = threads.resolve(t, nil) })
+end
+
+local function item_by_id(id)
+  for _, item in ipairs(items) do
+    if item.thread.id == id then
+      return item
+    end
+  end
+end
+
+local function ids(hits)
+  local out = {}
+  for i, h in ipairs(hits) do
+    out[i] = h.thread.id
+  end
+  return out
+end
+
+-- Line 77 is covered by the wide thread (62-84) and the one anchored there
+-- (77-77) -- the narrower one wins, per ADR-0002's overlap rule.
+do
+  local hits = threads.covering(items, 77)
+  eq(ids(hits), { 96937, 97122 }, 'covering: narrowest first at line 77')
+end
+
+-- Line 83 is covered by the wide thread and the 82-83 one nested in it.
+do
+  local hits = threads.covering(items, 83)
+  eq(ids(hits), { 96938, 97122 }, 'covering: narrowest first at line 83')
+end
+
+-- A line covered by exactly one thread returns that one thread.
+do
+  local hits = threads.covering(items, 19)
+  eq(ids(hits), { 96940 }, 'covering: single hit')
+end
+
+-- A line no thread covers returns no hits, not an error.
+do
+  local hits = threads.covering(items, 50)
+  eq(hits, {}, 'covering: no hits on an uncovered line')
+end
+
+-- covering() does not mutate the items list it was handed.
+do
+  local before = ids(items)
+  threads.covering(items, 77)
+  eq(ids(items), before, 'covering: does not reorder the input')
+end
+
+-- ordered() walks the whole file start-to-end; with distinct start lines the
+-- containing thread (97122, starting at 62) is visited before the ones it
+-- contains (96937 at 77, 96938 at 82), simply because its span starts first.
+do
+  local out = threads.ordered(items)
+  eq(ids(out), { 96940, 97122, 96937, 96938, 97128 }, 'ordered: file order, outer before nested')
+end
+
+-- Two threads sharing a start line: the wider (outer) one sorts first.
+do
+  local shared = {
+    { thread = { id = 2 }, range = { line_start = 10, line_end = 10 } },
+    { thread = { id = 1 }, range = { line_start = 10, line_end = 20 } },
+  }
+  local out = threads.ordered(shared)
+  eq(ids(out), { 1, 2 }, 'ordered: wider thread first on a shared start line')
+end
+
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
   for _, f in ipairs(failures) do io.stderr:write('  - ' .. f .. '\n') end

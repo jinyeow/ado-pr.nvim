@@ -71,6 +71,19 @@ local function place(buf, line_count, range, thread)
   end
 end
 
+-- Signed items (thread + resolved range) for one repo-relative path, normalised.
+-- The follower pane (view.lua) uses this to find the threads covering the cursor
+-- and to walk between them with ]t / [t.
+function M.items_for(path)
+  local out = {}
+  for _, item in ipairs(signed) do
+    if item.path == path then
+      table.insert(out, item)
+    end
+  end
+  return out
+end
+
 -- Re-render signs in diffview's current right-side buffer for the file under the cursor.
 -- A multi-line thread is marked across its whole span, not only at its first line. Threads
 -- on files outside the current diff scope are skipped by the path match below. Safe to call
@@ -88,10 +101,8 @@ function M.refresh()
 
   local entry_path = threads_mod.norm_repo_path(state.entry.path)
   local line_count = vim.api.nvim_buf_line_count(win.bufnr)
-  for _, item in ipairs(signed) do
-    if item.path == entry_path then
-      place(win.bufnr, line_count, item.range, item.thread)
-    end
+  for _, item in ipairs(M.items_for(entry_path)) do
+    place(win.bufnr, line_count, item.range, item.thread)
   end
 end
 

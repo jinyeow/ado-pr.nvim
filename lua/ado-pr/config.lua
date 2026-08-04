@@ -7,6 +7,14 @@ local defaults = {
   project = nil, -- e.g. 'TSC Cloud Platform Engineering'
   repository = nil, -- e.g. 'T2.ServiceCatalogue'
   api_version = '7.1', -- ADO REST api-version for `az devops invoke`
+  keymaps = {
+    -- Buffer-local to diffview's diff windows only (signs.lua / view.lua wire
+    -- these), single-key by default -- prototypes/NOTES.md found two-key
+    -- <leader> sequences read as sluggish under a short timeoutlen.
+    toggle_thread_pane = '<F8>',
+    next_thread = ']t',
+    prev_thread = '[t',
+  },
 }
 
 local current = vim.deepcopy(defaults)
