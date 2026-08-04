@@ -15,7 +15,9 @@ package.path = './lua/?.lua;./lua/?/init.lua;' .. package.path
 -- picked up on every call (same technique as tests/diffview_state_spec.lua).
 local current_view = nil
 package.loaded['diffview.lib'] = {
-  get_current_view = function() return current_view end,
+  get_current_view = function()
+    return current_view
+  end,
 }
 
 local view = require('ado-pr.view')
