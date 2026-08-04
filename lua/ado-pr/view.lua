@@ -189,6 +189,7 @@ function M.jump(delta)
     target = target or ordered[#ordered]
   end
   vim.api.nvim_win_set_cursor(win, { target.range.line_start, 0 })
+  vim.api.nvim_set_current_win(win)
 end
 
 -- Buffer-local, user-configurable maps on diffview's diff windows (both sides,
