@@ -20,6 +20,7 @@ package.path = './lua/?.lua;./lua/?/init.lua;' .. package.path
 
 local config = require('ado-pr.config')
 local az = require('ado-pr.az')
+local threads = require('ado-pr.threads')
 
 config.setup({ organization = 'https://dev.azure.com/Org', api_version = '7.1' })
 
@@ -129,6 +130,31 @@ do
   stub_response({ count = 0, value = 'oops' })
   local decoded, err = az.list_threads(ctx)
   ok(decoded == nil and err ~= nil, 'list_threads: wrong-typed value field errors', tostring(err))
+end
+
+-- A PR-level thread arrives with a literal JSON `null` threadContext. The decoder
+-- must map it to Lua nil, NOT the vim.NIL userdata sentinel: vim.NIL is truthy, so
+-- downstream `if thread.threadContext` guards (threads.path/resolve) would index a
+-- userdata and error. The stub bypasses vim.json.encode here because encoding a Lua
+-- table with a nil field just omits the key -- only a raw JSON string carries `null`.
+do
+  vim.system = function(_cmd, _opts)
+    return {
+      wait = function()
+        return {
+          code = 0,
+          stdout = '{"count":1,"value":[{"id":9,"threadContext":null,"comments":[]}]}',
+          stderr = '',
+        }
+      end,
+    }
+  end
+  local decoded, err = az.list_threads(ctx)
+  ok(decoded and not err, 'list_threads: JSON null threadContext decodes without error', err)
+  ok(decoded[1].threadContext == nil, 'list_threads: JSON null threadContext is Lua nil, not vim.NIL',
+    vim.inspect(decoded[1].threadContext))
+  local p_ok, p = pcall(threads.path, decoded[1])
+  ok(p_ok and p == nil, 'threads.path: decoded PR-level thread returns nil without erroring', tostring(p))
 end
 
 vim.system = real_system

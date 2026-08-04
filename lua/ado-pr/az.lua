@@ -40,7 +40,10 @@ local function az_json(args)
   if start then
     out = out:sub(start)
   end
-  local ok, decoded = pcall(vim.json.decode, out)
+  -- luanil: decode JSON `null` to Lua nil, not the truthy vim.NIL userdata --
+  -- ADO sends `threadContext: null` on PR-level threads, and downstream falsy
+  -- checks (threads.path/resolve) rely on nil.
+  local ok, decoded = pcall(vim.json.decode, out, { luanil = { object = true, array = true } })
   if not ok then
     return nil, 'failed to decode az output: ' .. tostring(decoded)
   end
