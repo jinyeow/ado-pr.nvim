@@ -120,10 +120,6 @@ function M.open(id)
   if pr_level > 0 then
     vim.notify(('ado-pr: %d PR-level thread%s'):format(pr_level, pr_level == 1 and '' or 's'), vim.log.levels.INFO)
   end
-  local not_showable = signs.not_showable_count()
-  if not_showable > 0 then
-    vim.notify(('ado-pr: %d left-side thread%s not showable in this layout'):format(not_showable, not_showable == 1 and '' or 's'), vim.log.levels.INFO)
-  end
 end
 
 -- Post an inline comment thread on the line under the cursor in the diff.
