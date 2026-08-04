@@ -172,8 +172,7 @@ do
   local tab1 = vim.api.nvim_get_current_tabpage()
   view.attach()
   ok(view.is_open(tab1), 'session 1: pane open in its own tab')
-  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadView' .. tostring(tab1) }),
-    'session 1: augroup exists')
+  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadView' .. tostring(tab1) }), 'session 1: augroup exists')
 
   vim.cmd('tabnew')
   local tab2 = vim.api.nvim_get_current_tabpage()
@@ -181,8 +180,10 @@ do
   ok(tab1 ~= tab2, 'sessions: distinct tabpages')
   ok(view.is_open(tab2), 'session 2: pane open in its own tab')
   ok(view.is_open(tab1), 'session 2 attach: session 1 pane still open (not orphaned)')
-  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadView' .. tostring(tab1) }),
-    'session 2 attach: session 1 augroup still exists (not cleared by session 2)')
+  ok(
+    pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadView' .. tostring(tab1) }),
+    'session 2 attach: session 1 augroup still exists (not cleared by session 2)'
+  )
 
   -- A cursor move inside session 2's tab must never rewrite or close session
   -- 1's pane.
@@ -195,10 +196,8 @@ do
   -- below observes a real augroup, not one that was never created.
   vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewOpened', modeline = false })
   vim.wait(20)
-  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadViewCursor' .. tostring(tab1) }),
-    'DiffviewViewOpened: session 1 cursor augroup created')
-  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadViewCursor' .. tostring(tab2) }),
-    'DiffviewViewOpened: session 2 cursor augroup created')
+  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadViewCursor' .. tostring(tab1) }), 'DiffviewViewOpened: session 1 cursor augroup created')
+  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadViewCursor' .. tostring(tab2) }), 'DiffviewViewOpened: session 2 cursor augroup created')
 
   -- Closing session 2's pane must close only session 2's, not session 1's.
   view.close(tab2)
@@ -214,10 +213,11 @@ do
   vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewClosed', modeline = false })
   vim.wait(20)
   ok(view.is_open(tab1), 'DiffviewViewClosed after tab2 closed: session 1 pane untouched')
-  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadView' .. tostring(tab1) }),
-    'DiffviewViewClosed after tab2 closed: session 1 augroup untouched')
-  ok(not pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadViewCursor' .. tostring(tab2) }),
-    'DiffviewViewClosed after tab2 closed: session 2 cursor augroup torn down')
+  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadView' .. tostring(tab1) }), 'DiffviewViewClosed after tab2 closed: session 1 augroup untouched')
+  ok(
+    not pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadViewCursor' .. tostring(tab2) }),
+    'DiffviewViewClosed after tab2 closed: session 2 cursor augroup torn down'
+  )
 
   -- Re-attaching in a fresh tab must not orphan or leak session 1's pane.
   vim.cmd('tabnew')
