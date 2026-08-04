@@ -151,8 +151,7 @@ do
   end
   local decoded, err = az.list_threads(ctx)
   ok(decoded and not err, 'list_threads: JSON null threadContext decodes without error', err)
-  ok(decoded[1].threadContext == nil, 'list_threads: JSON null threadContext is Lua nil, not vim.NIL',
-    vim.inspect(decoded[1].threadContext))
+  ok(decoded[1].threadContext == nil, 'list_threads: JSON null threadContext is Lua nil, not vim.NIL', vim.inspect(decoded[1].threadContext))
   local p_ok, p = pcall(threads.path, decoded[1])
   ok(p_ok and p == nil, 'threads.path: decoded PR-level thread returns nil without erroring', tostring(p))
 end
@@ -161,7 +160,9 @@ vim.system = real_system
 
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
-  for _, f in ipairs(failures) do io.stderr:write('  - ' .. f .. '\n') end
+  for _, f in ipairs(failures) do
+    io.stderr:write('  - ' .. f .. '\n')
+  end
   os.exit(1)
 end
 io.write(('ok  %d assertions\n'):format(count))

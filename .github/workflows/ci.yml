@@ -32,9 +32,6 @@ jobs:
   lint:
     name: stylua
     runs-on: ubuntu-latest
-    # Codebase predates .stylua.toml and isn't reformatted yet (tracked ticket).
-    # Report only, don't block, until that reformat PR lands.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: JohnnyMorganz/stylua-action@v4
