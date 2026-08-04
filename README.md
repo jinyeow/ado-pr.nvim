@@ -2,8 +2,8 @@
 
 Review **Azure DevOps** pull requests from Neovim — the gap `octo.nvim` leaves (it's GitHub-only).
 
-> **Status: MVP.** Pick / checkout / diff active PRs, set a vote, and post inline comment threads
-> through the `az` CLI. Not yet smoke-tested against a live PR; not published.
+> **Status: MVP.** Pick / checkout / diff active PRs, set a vote, and post/show inline comment
+> threads through the `az` CLI. Not yet smoke-tested against a live PR; not published.
 
 ## Why
 
@@ -52,9 +52,11 @@ lua/ado-pr/
   config.lua   user config (org/project/repo)
   az.lua       az CLI + `az devops invoke` glue (reads, checkout, vote, post thread)
   anchor.lua   diffview cursor → (filePath, line, side) ADO thread anchor (pure + adapter)
+  threads.lua  filter + read-resolve ADO PR comment threads (pure: no Neovim API, no network)
+  signs.lua    thread markers in diffview's right-side buffer (adapter over threads.lua + diffview_state)
   diffview_state.lua  active diffview view: entry, layout kind, per-side win/buf, inline hunks
   state.lua    active-PR context (id/repoId/project) for the review session
-  review.lua   checkout → fetch PR target ref → DiffviewOpen target...HEAD; post inline comments
+  review.lua   checkout → fetch PR target ref → DiffviewOpen target...HEAD; post/sign comment threads
   picker.lua   fzf-lua active-PR picker
 plugin/ado-pr.lua  user commands
 tests/         headless assert specs (`nvim --headless -l tests/<name>_spec.lua`)
@@ -65,8 +67,11 @@ tests/         headless assert specs (`nvim --headless -l tests/<name>_spec.lua`
 1. **[done] Read/checkout/diff/vote** via `az`.
 2. **[done] Inline comment threads** — `az devops invoke --resource pullRequestThreads` POST; the
    diffview cursor maps to `(filePath, line, side)` in `anchor.lua`. Needs a live-PR smoke test.
-3. **[next]** Show existing threads as virtual text / signs in the diff buffers.
-4. Live refresh, reviewers, status checks.
+3. **[done] Show existing threads as signs in the diff buffers** — right-side (new-file) threads
+   only; `●` active / `○` resolved, re-applied on diffview's buffer-enter event. Left-side anchors
+   and the thread-body follower pane are next. Needs a live-PR smoke test.
+4. Left-side thread anchors, the thread-body follower pane, iteration browsing, live refresh,
+   reviewers, status checks.
 
 The hard part is step 2/3: anchoring threads onto diffview buffers. Side is taken from the **focused
 diff pane** (right = new, left = old), and the path from diffview's `cur_entry` — the *displayed* diff

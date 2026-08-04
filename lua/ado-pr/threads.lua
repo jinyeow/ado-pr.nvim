@@ -98,6 +98,24 @@ function M.original(thread)
   }
 end
 
+-- 'active' and 'pending' are ADO's non-terminal CommentThreadStatus values -- a thread
+-- awaiting a response is still open for discussion. Everything else (fixed, wontFix, closed,
+-- byDesign) is terminal. The sign only distinguishes "still open" from "not", so this checks
+-- against the terminal set rather than special-casing 'active' alone.
+local UNRESOLVED_STATUSES = { active = true, pending = true }
+
+function M.is_resolved(thread)
+  return not UNRESOLVED_STATUSES[thread.status]
+end
+
+-- Normalise a diffview repo-relative path (which can carry backslashes on Windows, e.g.
+-- FileEntry.oldpath -- see anchor.lua) to the same forward-slash, no-leading-slash form
+-- to_repo_path/path() already produce, so callers can compare the two directly. Idempotent
+-- on input already in that form.
+function M.norm_repo_path(path)
+  return (path or ''):gsub('\\', '/'):gsub('^/', '')
+end
+
 -- Clamp a { line_start, line_end } range into [1, line_count], never erroring on a
 -- range that has outlived the buffer it was written against. A zero-line buffer has
 -- no valid line in [1, 0]; both ends collapse to 0 rather than falsely reporting line 1.

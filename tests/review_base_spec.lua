@@ -14,6 +14,18 @@ config.setup({ organization = 'https://dev.azure.com/Org', project = 'My Project
 -- the DiffviewOpen path (not the vim-fugitive fallback) is exercised.
 package.loaded['diffview'] = {}
 
+-- ado-pr.signs is an untested adapter (thin glue over diffview/Neovim internals, no seam
+-- worth mocking there -- see signs.lua's own header); stub it here instead, at review.lua's
+-- boundary, so review.open's WIRING into it (fetch -> set_threads -> attach -> refresh) is
+-- assertable without touching diffview.
+local signs_calls
+package.loaded['ado-pr.signs'] = {
+  set_threads = function(list) table.insert(signs_calls, { fn = 'set_threads', list = list }) end,
+  attach = function() table.insert(signs_calls, { fn = 'attach' }) end,
+  refresh = function() table.insert(signs_calls, { fn = 'refresh' }) end,
+  pr_level_count = function() return 0 end,
+}
+
 local az = require('ado-pr.az')
 local review = require('ado-pr.review')
 local state = require('ado-pr.state')
@@ -29,7 +41,7 @@ end
 -- Sequenced log of every vim.system call and every vim.cmd call, so ordering
 -- (fetch before diff) is assertable, not just presence.
 local calls
-local checkout_result, show_result, fetch_result, revparse_result
+local checkout_result, show_result, fetch_result, revparse_result, threads_result
 
 local real_system = vim.system
 local function stub_system()
@@ -49,6 +61,8 @@ local function stub_system()
       return { wait = function() return checkout_result end }
     elseif vim.tbl_contains(cmd, 'show') then
       return { wait = function() return show_result end }
+    elseif vim.tbl_contains(cmd, 'pullRequestThreads') then
+      return { wait = function() return threads_result end }
     end
     error('unexpected vim.system call: ' .. vim.inspect(cmd))
   end
@@ -72,6 +86,7 @@ end
 
 local function reset(opts)
   calls = {}
+  signs_calls = {}
   stub_system()
   stub_cmd()
   stub_notify()
@@ -86,6 +101,8 @@ local function reset(opts)
   }
   fetch_result = (opts and opts.fetch_result) or { code = 0, stdout = '', stderr = '' }
   revparse_result = (opts and opts.revparse_result) or { code = 0, stdout = 'deadbeef\n', stderr = '' }
+  threads_result = (opts and opts.threads_result)
+    or { code = 0, stdout = vim.json.encode({ count = 0, value = {} }), stderr = '' }
 end
 
 local function system_calls()
@@ -151,6 +168,21 @@ do
   end
 
   ok(state.get() and state.get().id == 99, 'happy: active-PR state set after a successful diff open')
+
+  -- Threads are fetched and wired into signs AFTER the diff opens and the active-PR
+  -- state is captured (the threads route needs ctx.repositoryId/project from state).
+  local threads_idx = index_of(function(c)
+    return c.kind == 'system' and vim.tbl_contains(c.cmd, 'pullRequestThreads')
+  end)
+  ok(threads_idx ~= nil, 'happy: PR comment threads fetched')
+  ok(diff_idx and threads_idx and diff_idx < threads_idx, 'happy: threads fetched after DiffviewOpen')
+
+  local fns = {}
+  for _, c in ipairs(signs_calls) do table.insert(fns, c.fn) end
+  ok(vim.deep_equal(fns, { 'set_threads', 'attach', 'refresh' }),
+    'happy: signs wired in order (set_threads, attach, refresh)', vim.inspect(fns))
+  ok(signs_calls[1] and vim.deep_equal(signs_calls[1].list, {}),
+    'happy: set_threads receives the decoded (empty) thread list', vim.inspect(signs_calls[1] and signs_calls[1].list))
 end
 
 -- A show_pr failure aborts: no fetch, no diff, an ERROR notify.
@@ -229,6 +261,29 @@ do
   ok(has_error, 'missing targetRefName: notifies at ERROR')
   ok(state.get() and state.get().id == 'previous-pr',
     'missing targetRefName: active-PR state left untouched', vim.inspect(state.get()))
+end
+
+-- A PR-comment-threads fetch failure does NOT abort the review: the diff already opened
+-- successfully, so it warns and signs an empty thread list rather than losing the diff.
+do
+  reset({ threads_result = { code = 1, stdout = '', stderr = 'no route to host' } })
+  review.open(6)
+
+  ok(#cmd_calls() == 1, 'threads failure: DiffviewOpen still ran', #cmd_calls())
+  ok(state.get() and state.get().id == 6, 'threads failure: active-PR state still set')
+
+  local has_warn = false
+  for _, n in ipairs(notifications) do
+    if n.level == vim.log.levels.WARN then has_warn = true end
+  end
+  ok(has_warn, 'threads failure: notifies at WARN, not ERROR')
+
+  local fns = {}
+  for _, c in ipairs(signs_calls) do table.insert(fns, c.fn) end
+  ok(vim.deep_equal(fns, { 'set_threads', 'attach', 'refresh' }),
+    'threads failure: signs still wired', vim.inspect(fns))
+  ok(signs_calls[1] and vim.deep_equal(signs_calls[1].list, {}),
+    'threads failure: set_threads receives an empty list, not nil', vim.inspect(signs_calls[1] and signs_calls[1].list))
 end
 
 -- A rev-parse failure (fetch succeeded but FETCH_HEAD won't resolve) aborts.

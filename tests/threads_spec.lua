@@ -264,6 +264,36 @@ do
 end
 
 -- ---------------------------------------------------------------------------
+-- is_resolved
+-- ---------------------------------------------------------------------------
+
+-- 'active' and 'pending' are the unresolved statuses (a thread awaiting a response is
+-- still open for discussion); every terminal ADO status (fixed, wontFix, closed, byDesign)
+-- reads as resolved -- the sign only distinguishes "still open" from "not".
+do
+  ok(threads.is_resolved({ status = 'active' }) == false, 'is_resolved: active is not resolved')
+  ok(threads.is_resolved({ status = 'pending' }) == false, 'is_resolved: pending is not resolved')
+  ok(threads.is_resolved({ status = 'fixed' }) == true, 'is_resolved: fixed is resolved')
+  ok(threads.is_resolved({ status = 'closed' }) == true, 'is_resolved: closed is resolved')
+  ok(threads.is_resolved({ status = 'wontFix' }) == true, 'is_resolved: wontFix is resolved')
+  ok(threads.is_resolved({ status = 'byDesign' }) == true, 'is_resolved: byDesign is resolved')
+end
+
+-- ---------------------------------------------------------------------------
+-- norm_repo_path
+-- ---------------------------------------------------------------------------
+
+-- Normalises a diffview repo-relative path (which can carry backslashes on Windows) to the
+-- same forward-slash, no-leading-slash form to_repo_path/path() already produce, so callers
+-- can compare the two directly. Idempotent on input already in that form.
+do
+  ok(threads.norm_repo_path('lua\\ado-pr\\az.lua') == 'lua/ado-pr/az.lua', 'norm_repo_path: backslashes to forward')
+  ok(threads.norm_repo_path('/lua/ado-pr/az.lua') == 'lua/ado-pr/az.lua', 'norm_repo_path: strips leading slash')
+  ok(threads.norm_repo_path('lua/ado-pr/az.lua') == 'lua/ado-pr/az.lua', 'norm_repo_path: idempotent')
+  ok(threads.norm_repo_path(nil) == '', 'norm_repo_path: nil is empty string')
+end
+
+-- ---------------------------------------------------------------------------
 -- Fixture-shaped set: mirrors prototypes/fixtures_threads.lua's ratios --
 -- 5 human threads clustered in ONE file, an overlapping span (62-84 contains 77 and
 -- 82-83), 3 of 5 carrying trackingCriteria, and ~16 system-only threads dominating
