@@ -9,13 +9,16 @@ local signs = require('ado-pr.signs')
 local state = require('ado-pr.state')
 
 -- Record the active-PR context so :AdoPrComment knows which PR/repo to post to.
--- The threads route wants the repository GUID, taken from the PR payload.
-local function capture_context(id, pr)
+-- The threads route wants the repository GUID, taken from the PR payload. `base` is the
+-- commit diffview was opened against -- signs.lua needs it to self-compute a hunk table
+-- for diff1_plain/diff1_raw (docs/specs/left-side-thread-anchoring.md).
+local function capture_context(id, pr, base)
   local repo = pr.repository or {}
   state.set({
     id = id,
     repositoryId = repo.id,
     project = (repo.project and repo.project.name) or config.get().project,
+    base = base,
   })
 end
 
@@ -93,7 +96,7 @@ function M.open(id)
   end
   -- Only now that the diff has actually opened does the active-PR state
   -- (which :AdoPrComment relies on) switch to this PR.
-  capture_context(id, pr)
+  capture_context(id, pr, base)
 
   local list, terr = az.list_threads(state.get())
   if not list then
@@ -107,6 +110,16 @@ function M.open(id)
   if pr_level > 0 then
     vim.notify(
       ('ado-pr: %d PR-level thread%s'):format(pr_level, pr_level == 1 and '' or 's'),
+      vim.log.levels.INFO
+    )
+  end
+  local not_showable = signs.not_showable_count()
+  if not_showable > 0 then
+    vim.notify(
+      ('ado-pr: %d left-side thread%s not showable in this layout'):format(
+        not_showable,
+        not_showable == 1 and '' or 's'
+      ),
       vim.log.levels.INFO
     )
   end

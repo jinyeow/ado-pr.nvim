@@ -11,6 +11,11 @@ local M = {}
 ---@field id integer          pull request id
 ---@field repositoryId string repository GUID
 ---@field project string      project name (for the invoke route)
+---@field base string|nil     the resolved base commit review.lua opened diffview against
+---                            (base...HEAD) -- signs.lua reads it to self-compute a hunk
+---                            table for diff1_plain/diff1_raw (left-side-thread-
+---                            anchoring.md), which have no diffview diff renderer to read
+---                            one from.
 
 ---@type AdoPrContext|nil
 local current = nil

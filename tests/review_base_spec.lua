@@ -24,6 +24,7 @@ package.loaded['ado-pr.signs'] = {
   attach = function() table.insert(signs_calls, { fn = 'attach' }) end,
   refresh = function() table.insert(signs_calls, { fn = 'refresh' }) end,
   pr_level_count = function() return 0 end,
+  not_showable_count = function() return 0 end,
 }
 
 local az = require('ado-pr.az')
@@ -168,6 +169,8 @@ do
   end
 
   ok(state.get() and state.get().id == 99, 'happy: active-PR state set after a successful diff open')
+  ok(state.get() and state.get().base == 'deadbeef',
+    'happy: active-PR state captures the resolved diff base (signs.lua needs it for diff1_plain/diff1_raw hunks)')
 
   -- Threads are fetched and wired into signs AFTER the diff opens and the active-PR
   -- state is captured (the threads route needs ctx.repositoryId/project from state).
