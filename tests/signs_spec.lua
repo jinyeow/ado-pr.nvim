@@ -192,6 +192,46 @@ for _, layout in ipairs({ 'diff1_plain', 'diff1_raw', 'diff1_inline' }) do
   eq(result.placements, {}, layout .. ': nil hunks yields zero placements')
 end
 
+-- diff1_plain / diff1_raw: a 1:1 replacement hunk pairs each old line with its direct
+-- new-row counterpart (old_line - old_start == new_start + offset) instead of marking the
+-- whole hunk unshowable.
+for _, layout in ipairs({ 'diff1_plain', 'diff1_raw' }) do
+  local hunks = { { old_start = 5, old_count = 2, new_start = 5, new_count = 2 } }
+  local signed_items = {
+    { thread = { status = 'active' }, path = 'f.lua', range = { side = 'left', line_start = 5, line_end = 6 } },
+  }
+  local result = signs.plan(layout, hunks, signed_items, 'f.lua', { b = 50 })
+  eq(result.not_showable, 0, layout .. ': replacement hunk fully paired, not_showable 0')
+  ok(#result.placements == 1, layout .. ': replacement hunk one placement')
+  eq(result.placements[1].lines, { 5, 6 }, layout .. ': replacement hunk paired rows')
+end
+
+-- diff1_plain / diff1_raw: a shrinking hunk pairs old lines within new_count and marks the
+-- excess old line (beyond new_count) unshowable.
+for _, layout in ipairs({ 'diff1_plain', 'diff1_raw' }) do
+  local hunks = { { old_start = 5, old_count = 3, new_start = 5, new_count = 2 } }
+  local signed_items = {
+    { thread = { status = 'active' }, path = 'f.lua', range = { side = 'left', line_start = 5, line_end = 7 } },
+  }
+  local result = signs.plan(layout, hunks, signed_items, 'f.lua', { b = 50 })
+  eq(result.not_showable, 1, layout .. ': shrink hunk excess line unshowable')
+  ok(#result.placements == 1, layout .. ': shrink hunk still places paired lines')
+  eq(result.placements[1].lines, { 5, 6 }, layout .. ': shrink hunk paired rows only')
+end
+
+-- diff1_inline: pairing is a plain/raw-only concern -- inline keeps anchoring every in-hunk
+-- line to the hang row regardless of pairing, unchanged by this fix.
+do
+  local hunks = { { old_start = 5, old_count = 2, new_start = 5, new_count = 2 } }
+  local signed_items = {
+    { thread = { status = 'active' }, path = 'f.lua', range = { side = 'left', line_start = 5, line_end = 6 } },
+  }
+  local result = signs.plan('diff1_inline', hunks, signed_items, 'f.lua', { b = 50 })
+  eq(result.not_showable, 0, 'diff1_inline: replacement hunk not_showable 0')
+  ok(#result.placements == 1, 'diff1_inline: replacement hunk one placement')
+  eq(result.placements[1].lines, { 4 }, 'diff1_inline: replacement hunk still anchors to hang row')
+end
+
 -- Items on a different path than entry_path are ignored entirely.
 do
   local signed_items = {

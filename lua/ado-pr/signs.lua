@@ -158,10 +158,35 @@ local function plain_hunks_for(entry_path)
   return result_hunks
 end
 
+-- Find the hunk `old_line` falls inside, if any. old_line_to_row already does this walk
+-- internally but only reports the anchor row, not the hunk itself -- pairing needs the
+-- hunk's own old_start/new_start/new_count to compute a per-line offset.
+local function hunk_containing(hunks, old_line)
+  for _, h in ipairs(hunks or {}) do
+    if old_line >= h.old_start and old_line < h.old_start + h.old_count then
+      return h
+    end
+  end
+  return nil
+end
+
+-- A 1:1 replacement pairing for an in-hunk old line: offset i = old_line - old_start maps
+-- to new row new_start + i, same row diffview's own renderer shows the replacement on --
+-- but only while i is still within the hunk's new range. An old line at offset >= new_count
+-- has no new-side counterpart at all (genuinely deleted), so it is not paired.
+local function paired_row(h, old_line)
+  local i = old_line - h.old_start
+  if i < h.new_count then
+    return h.new_start + i
+  end
+  return nil
+end
+
 -- Map a left-side thread's range through the hunk table for single-window layouts.
 -- diff1_inline always has a real row to sign (the row a pure deletion's virtual lines
--- hang from); diff1_plain/diff1_raw do not, and a range that maps to zero exact rows
--- is unshowable rather than being placed at a guessed row.
+-- hang from), so every in-hunk line anchors there regardless of pairing. diff1_plain/
+-- diff1_raw have no such anchor: an in-hunk old line is placed at its paired row when one
+-- exists, and only falls back to unshowable when it doesn't (a genuine deletion).
 --
 -- `hunks == nil` means the hunk table is unresolved (git-diff failed or was never
 -- attempted), not "no hunks in this file" -- treated as fully unshowable rather than
@@ -178,7 +203,13 @@ local function left_single_window_lines(layout, hunks, range)
     if exact or INLINE_LAYOUTS[layout] then
       table.insert(lines, row)
     else
-      any_unshowable = true
+      local h = hunk_containing(hunks, line)
+      local pr = h and paired_row(h, line)
+      if pr then
+        table.insert(lines, pr)
+      else
+        any_unshowable = true
+      end
     end
   end
   return lines, any_unshowable
