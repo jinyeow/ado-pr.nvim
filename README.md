@@ -29,7 +29,6 @@ require('ado-pr').setup({
   organization = 'https://dev.azure.com/YourOrg',
   project = 'Your Project',
   repository = 'Your.Repo',
-  base_branch = 'origin/main',
 })
 ```
 
@@ -50,12 +49,12 @@ and fails if the PR's branch already has a worktree. See the review-worktree wor
 ```
 lua/ado-pr/
   init.lua     setup() + lazy accessors
-  config.lua   user config (org/project/repo/base_branch)
+  config.lua   user config (org/project/repo)
   az.lua       az CLI + `az devops invoke` glue (reads, checkout, vote, post thread)
   anchor.lua   diffview cursor → (filePath, line, side) ADO thread anchor (pure + adapter)
   diffview_state.lua  active diffview view: entry, layout kind, per-side win/buf, inline hunks
   state.lua    active-PR context (id/repoId/project) for the review session
-  review.lua   checkout → DiffviewOpen base...HEAD; post inline comments
+  review.lua   checkout → fetch PR target ref → DiffviewOpen target...HEAD; post inline comments
   picker.lua   fzf-lua active-PR picker
 plugin/ado-pr.lua  user commands
 tests/         headless assert specs (`nvim --headless -l tests/<name>_spec.lua`)
