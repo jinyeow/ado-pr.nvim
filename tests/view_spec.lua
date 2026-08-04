@@ -117,8 +117,7 @@ do
   end
   local recombined = table.concat(body, ' '):gsub('%s+', ' '):gsub('%s+$', '')
   local original = long:gsub('%s+', ' '):gsub('%s+$', '')
-  ok(recombined == original, 'multi-byte comment: wrapped text round-trips with no corruption',
-    recombined .. ' ~= ' .. original)
+  ok(recombined == original, 'multi-byte comment: wrapped text round-trips with no corruption', recombined .. ' ~= ' .. original)
 end
 
 -- Empty-state lines are a fixed, recognisable placeholder -- "shows nothing
@@ -158,8 +157,11 @@ do
 
   for _, w in ipairs(wins) do
     local after = vim.api.nvim_win_call(w, vim.fn.winsaveview)
-    eq({ topline = after.topline, lnum = after.lnum }, { topline = before[w].topline, lnum = before[w].lnum },
-      ('open+close: window %d scroll position unchanged'):format(w))
+    eq(
+      { topline = after.topline, lnum = after.lnum },
+      { topline = before[w].topline, lnum = before[w].lnum },
+      ('open+close: window %d scroll position unchanged'):format(w)
+    )
   end
 
   -- Clean up the extra split so it doesn't affect anything run after this block.
@@ -258,7 +260,9 @@ end
 
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
-  for _, f in ipairs(failures) do io.stderr:write('  - ' .. f .. '\n') end
+  for _, f in ipairs(failures) do
+    io.stderr:write('  - ' .. f .. '\n')
+  end
   os.exit(1)
 end
 io.write(('ok  %d assertions\n'):format(count))

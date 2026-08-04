@@ -126,7 +126,7 @@ end
 
 -- Threads covering `line`, narrowest first (thread id as a stable tiebreak).
 -- `items` is signs.lua's { thread, range } shape for one file. Overlapping
--- threads are the normal case (ADR-0002): the follower pane shows only the
+-- threads are the normal case: the follower pane shows only the
 -- first result, so this ordering IS the selection rule, not just a sort.
 function M.covering(items, line)
   local hits = {}
