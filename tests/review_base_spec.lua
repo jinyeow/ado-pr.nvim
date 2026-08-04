@@ -301,6 +301,32 @@ do
     'threads failure: set_threads receives an empty list, not nil', vim.inspect(signs_calls[1] and signs_calls[1].list))
 end
 
+-- Diffview unavailable: the vim-fugitive fallback must not attach the follower
+-- pane (it depends on Diffview window/scene APIs it doesn't have, and its
+-- teardown relies on DiffviewViewClosed, which never fires without Diffview) --
+-- only an INFO notify that the pane needs diffview.nvim.
+do
+  local saved_diffview = package.loaded['diffview']
+  package.loaded['diffview'] = nil
+  reset()
+  review.open(7)
+  package.loaded['diffview'] = saved_diffview
+
+  ok(#cmd_calls() == 1, 'diffview unavailable: fugitive fallback still opens', #cmd_calls())
+  local cmd_idx = index_of(function(c) return c.kind == 'cmd' end)
+  if cmd_idx then
+    ok(calls[cmd_idx].cmd:match('^Git difftool ') ~= nil,
+      'diffview unavailable: Git difftool fallback used', calls[cmd_idx].cmd)
+  end
+  ok(#view_calls == 0, 'diffview unavailable: view.attach not called', vim.inspect(view_calls))
+
+  local has_info = false
+  for _, n in ipairs(notifications) do
+    if n.level == vim.log.levels.INFO then has_info = true end
+  end
+  ok(has_info, 'diffview unavailable: notifies INFO that the thread pane needs diffview.nvim')
+end
+
 -- A rev-parse failure (fetch succeeded but FETCH_HEAD won't resolve) aborts.
 do
   reset({ revparse_result = { code = 1, stdout = '', stderr = 'unknown revision' } })
