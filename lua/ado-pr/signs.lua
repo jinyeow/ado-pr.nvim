@@ -140,10 +140,7 @@ local function plain_hunks_for(entry_path)
   if not (ctx and ctx.base) then
     return nil
   end
-  local res = vim.system(
-    { 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path },
-    { text = true, cwd = ctx.repo_root }
-  ):wait()
+  local res = vim.system({ 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = ctx.repo_root }):wait()
   if res.code ~= 0 then
     return nil, res.stderr
   end
@@ -293,10 +290,7 @@ function M.refresh()
   -- Only a real git failure (stderr present) is worth interrupting the user for -- no
   -- ctx/base is an ordinary "not reviewing a PR yet" state, not a failure.
   if hunks_err then
-    vim.notify(
-      ('ado-pr: git diff failed for %s: %s'):format(entry_path, hunks_err),
-      vim.log.levels.WARN
-    )
+    vim.notify(('ado-pr: git diff failed for %s: %s'):format(entry_path, hunks_err), vim.log.levels.WARN)
   end
 end
 
