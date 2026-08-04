@@ -15,7 +15,9 @@ package.path = './lua/?.lua;./lua/?/init.lua;' .. package.path
 
 local current_snapshot
 package.loaded['ado-pr.diffview_state'] = {
-  current = function() return current_snapshot end,
+  current = function()
+    return current_snapshot
+  end,
 }
 
 local state = require('ado-pr.state')
@@ -37,7 +39,9 @@ end
 -- ---------------------------------------------------------------------------
 
 local function make_thread(path, side, line_start, line_end, status)
-  local pos = function(l) return { line = l } end
+  local pos = function(l)
+    return { line = l }
+  end
   local tc = { filePath = '/' .. path }
   if side == 'right' then
     tc.rightFileStart = pos(line_start)
@@ -75,7 +79,9 @@ end
 
 local function find_placement(placements, target)
   for _, p in ipairs(placements) do
-    if p.target == target then return p end
+    if p.target == target then
+      return p
+    end
   end
 end
 
@@ -86,7 +92,11 @@ local function stub_system()
   system_calls = {}
   vim.system = function(cmd, opts)
     table.insert(system_calls, { cmd = cmd, opts = opts })
-    return { wait = function() return system_result end }
+    return {
+      wait = function()
+        return system_result
+      end,
+    }
   end
 end
 local function restore_system()
