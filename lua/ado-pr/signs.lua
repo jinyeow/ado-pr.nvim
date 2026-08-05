@@ -53,6 +53,13 @@ local plain_hunks_cache
 -- warn on every window switch. Reset by set_threads/attach so a new review session (or a
 -- re-fetch of threads) re-notifies rather than staying silent from a prior session.
 local last_notified_hunks_err
+-- Last (path, count) a not_showable notify fired for -- nil until the first refresh, so
+-- that refresh re-notifies on every count *change* (including the very first nonzero
+-- count) rather than once per PR review (issue #30). Keyed by path like
+-- last_notified_hunks_err above, so navigating to a different file whose count happens
+-- to match the previous file's does not wrongly stay silent. Reset by set_threads/attach
+-- so a new review session starts fresh.
+local last_notified_count
 
 -- Store the renderable threads for the active PR (a plain fetch -- no iteration window).
 -- Both left- and right-anchored threads are kept for signing; PR-level (no threadContext)
@@ -61,6 +68,7 @@ function M.set_threads(threads)
   signed, pr_level = {}, 0
   plain_hunks_cache = nil
   last_notified_hunks_err = nil
+  last_notified_count = nil
   for _, t in ipairs(threads or {}) do
     if threads_mod.is_renderable(t) then
       local path = threads_mod.path(t)
@@ -349,6 +357,26 @@ function M.refresh()
   else
     last_notified_hunks_err = nil
   end
+
+  -- Re-notify whenever the count changes -- on the initial open (review.lua's own
+  -- notify only fired once, on open) and on every later file/layout navigation
+  -- (issue #30). A drop to zero updates the tracker but stays silent by default. Skipped
+  -- entirely when hunks are unresolved (no ctx/base/repo_root, or a failed git diff): an
+  -- unresolved hunk table makes every single-window left-side thread count toward
+  -- not_showable regardless of whether it's genuinely unshowable, so that count is not
+  -- meaningful here -- a real git failure already got its own WARN above, and "no PR
+  -- context yet" isn't a failure worth announcing at all. last_notified_count is left
+  -- untouched so a later resolved refresh still compares against the last real count.
+  local hunks_resolved = two_window or hunks ~= nil
+  if hunks_resolved then
+    local count_key = entry_path .. '\0' .. not_showable
+    if count_key ~= last_notified_count then
+      if not_showable > 0 then
+        vim.notify(('ado-pr: %d left-side thread%s not showable in this layout'):format(not_showable, not_showable == 1 and '' or 's'), vim.log.levels.INFO)
+      end
+      last_notified_count = count_key
+    end
+  end
 end
 
 local group
@@ -358,6 +386,7 @@ local group
 -- autocmd firing forever. Safe to call repeatedly (each review re-creates the group).
 function M.attach()
   last_notified_hunks_err = nil
+  last_notified_count = nil
   group = vim.api.nvim_create_augroup('AdoPrThreads', { clear = true })
   vim.api.nvim_create_autocmd('User', {
     group = group,

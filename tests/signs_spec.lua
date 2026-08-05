@@ -636,6 +636,155 @@ do
   eq(marked_rows(buf_a), {}, 'cleanup: stale buf a extmarks cleared after layout switch')
 end
 
+-- ---------------------------------------------------------------------------
+-- M.refresh -- not_showable re-notify on every count change (issue #30: review.lua
+-- used to notify once on open; later navigation silently left new counts unannounced)
+-- ---------------------------------------------------------------------------
+
+-- Two unshowable threads (pure-deletion hunk, diff1_plain) notify once with the count.
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'notify.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  system_result = { code = 0, stdout = '@@ -10,3 +10,0 @@\n-a\n-b\n-c\n', stderr = '' }
+  stub_notify()
+  signs.set_threads({
+    make_thread('notify.lua', 'left', 10, 11, 'active'),
+    make_thread('notify.lua', 'left', 12, 12, 'active'),
+  })
+  signs.refresh()
+  eq(signs.not_showable_count(), 2, 'notify: two unshowable threads counted')
+  ok(#notifications == 1, 'notify: one notification on first refresh', #notifications)
+  ok(
+    notifications[1] and notifications[1].msg:match('2 left%-side threads not showable'),
+    'notify: message reports the count',
+    notifications[1] and notifications[1].msg
+  )
+  ok(notifications[1] and notifications[1].level == vim.log.levels.INFO, 'notify: level is INFO')
+
+  -- A second refresh with the same file/threads (e.g. bouncing WinEnter between a
+  -- file's two diff windows) does not repeat the notification.
+  signs.refresh()
+  ok(#notifications == 1, 'notify: unchanged count on later refresh does not repeat', #notifications)
+
+  -- Navigating to a different unshowable count re-notifies.
+  signs.set_threads({ make_thread('notify.lua', 'left', 10, 11, 'active') })
+  signs.refresh()
+  ok(#notifications == 2, 'notify: changed count notifies again', #notifications)
+  ok(
+    notifications[2] and notifications[2].msg:match('1 left%-side thread not showable'),
+    'notify: singular wording for count 1',
+    notifications[2] and notifications[2].msg
+  )
+
+  -- Dropping to zero updates the tracker but stays silent (default: no "all showable"
+  -- notification per the ticket).
+  signs.set_threads({})
+  signs.refresh()
+  eq(signs.not_showable_count(), 0, 'notify: count drops to 0')
+  ok(#notifications == 2, 'notify: drop to 0 stays silent', #notifications)
+
+  restore_system()
+  restore_notify()
+end
+
+-- set_threads() resets the tracker, so a new review session (or a re-fetch of threads)
+-- re-notifies even for a count it already notified about before.
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'reset.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  system_result = { code = 0, stdout = '@@ -10,3 +10,0 @@\n-a\n-b\n-c\n', stderr = '' }
+  stub_notify()
+  local threads = { make_thread('reset.lua', 'left', 10, 11, 'active') }
+  signs.set_threads(threads)
+  signs.refresh()
+  ok(#notifications == 1, 'reset: initial refresh notifies')
+
+  signs.set_threads(threads)
+  signs.refresh()
+  ok(#notifications == 2, 'reset: set_threads resets tracker, same count re-notifies', #notifications)
+
+  restore_system()
+  restore_notify()
+end
+
+-- Navigating to a different file whose not_showable count happens to match the
+-- previous file's count still re-notifies -- the dedup key must include the path, not
+-- just the count, or two files with equal counts wrongly stay silent on navigation.
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'cross-a.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  system_result = { code = 0, stdout = '@@ -10,3 +10,0 @@\n-a\n-b\n-c\n', stderr = '' }
+  stub_notify()
+  signs.set_threads({
+    make_thread('cross-a.lua', 'left', 10, 10, 'active'),
+    make_thread('cross-b.lua', 'left', 10, 10, 'active'),
+  })
+  signs.refresh()
+  eq(signs.not_showable_count(), 1, 'cross-file: file A not_showable count 1')
+  ok(#notifications == 1, 'cross-file: first refresh notifies')
+
+  -- Same threads retained (no set_threads() call) -- only the file under the cursor
+  -- changes, to a different path with the same not_showable count as file A.
+  current_snapshot.entry.path = 'cross-b.lua'
+  signs.refresh()
+  eq(signs.not_showable_count(), 1, 'cross-file: file B not_showable count 1 (same as A)')
+  ok(#notifications == 2, 'cross-file: different file with same count notifies again', #notifications)
+
+  restore_system()
+  restore_notify()
+end
+
+-- attach() also resets the tracker (a fresh :AdoPrReview session should re-notify even
+-- if the previous session already notified about the same count).
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'attach.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  system_result = { code = 0, stdout = '@@ -10,3 +10,0 @@\n-a\n-b\n-c\n', stderr = '' }
+  stub_notify()
+  signs.set_threads({ make_thread('attach.lua', 'left', 10, 11, 'active') })
+  signs.refresh()
+  ok(#notifications == 1, 'attach: initial refresh notifies')
+
+  signs.attach()
+  signs.refresh()
+  ok(#notifications == 2, 'attach: attach() resets tracker, same count re-notifies', #notifications)
+
+  restore_system()
+  restore_notify()
+end
+
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
   for _, f in ipairs(failures) do
