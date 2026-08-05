@@ -16,18 +16,21 @@ package.loaded['diffview'] = {}
 
 -- ado-pr.signs is an untested adapter (thin glue over diffview/Neovim internals, no seam
 -- worth mocking there -- see signs.lua's own header); stub it here instead, at review.lua's
--- boundary, so review.open's WIRING into it (fetch -> set_threads -> attach -> refresh) is
--- assertable without touching diffview.
+-- boundary, so review.open's WIRING into it and resolved_threads (fetch -> set_threads ->
+-- attach -> refresh) is assertable without touching diffview. Both stubs push into the
+-- same `signs_calls` array so the cross-module ordering assertion below still holds.
 local signs_calls
 package.loaded['ado-pr.signs'] = {
-  set_threads = function(list)
-    table.insert(signs_calls, { fn = 'set_threads', list = list })
-  end,
   attach = function()
     table.insert(signs_calls, { fn = 'attach' })
   end,
   refresh = function()
     table.insert(signs_calls, { fn = 'refresh' })
+  end,
+}
+package.loaded['ado-pr.resolved_threads'] = {
+  set_threads = function(list)
+    table.insert(signs_calls, { fn = 'set_threads', list = list })
   end,
   pr_level_count = function()
     return 0

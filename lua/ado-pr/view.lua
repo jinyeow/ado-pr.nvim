@@ -9,7 +9,7 @@
 local M = {}
 
 local threads_mod = require('ado-pr.threads')
-local signs = require('ado-pr.signs')
+local resolved_threads = require('ado-pr.resolved_threads')
 local diffview_state = require('ado-pr.diffview_state')
 local config = require('ado-pr.config')
 
@@ -94,7 +94,7 @@ function M.refresh(tab)
   local state = diffview_state.current()
   if state and state.windows.b and state.windows.b.bufnr then
     local line = vim.api.nvim_win_get_cursor(state.windows.b.winid)[1]
-    local items = signs.items_for(threads_mod.norm_repo_path(state.entry.path))
+    local items = resolved_threads.items_for(threads_mod.norm_repo_path(state.entry.path))
     local covering = threads_mod.covering(items, line)
     if #covering > 0 then
       lines = M.format_thread(covering[1].thread, { index = 1, total = #covering })
@@ -185,7 +185,7 @@ function M.jump(delta)
   end
   local win = state.windows.b.winid
   local bufnr = state.windows.b.bufnr
-  local ordered = threads_mod.ordered(signs.items_for(threads_mod.norm_repo_path(state.entry.path)))
+  local ordered = threads_mod.ordered(resolved_threads.items_for(threads_mod.norm_repo_path(state.entry.path)))
   if #ordered == 0 then
     return
   end
