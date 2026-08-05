@@ -60,7 +60,9 @@ end
 
 -- The full, unfiltered collection -- signs.lua's M.plan needs every item regardless of
 -- path (it does its own per-entry_path filtering internally), unlike items_for's
--- single-path lookup.
+-- single-path lookup. Returned by reference: treat it as read-only -- an in-place
+-- mutation would corrupt shared state without signs.lua's identity-based cache-reset
+-- noticing, since that only detects table replacement, not mutation.
 function M.all()
   return resolved
 end

@@ -540,6 +540,39 @@ do
   restore_notify()
 end
 
+-- Tracker reset: set_threads() also clears the self-computed plain_hunks_cache, so a new
+-- review session's git-diff result is re-derived rather than reusing a stale hunk table
+-- cached under the same path from a previous session.
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'hunkreset.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  system_result = { code = 0, stdout = '@@ -11,1 +11,0 @@\n-a\n', stderr = '' }
+  resolved_threads.set_threads({ make_thread('hunkreset.lua', 'left', 11, 11, 'active') })
+  signs.refresh()
+  eq(marked_rows(buf_b), {}, 'hunk cache reset: pure-deletion thread not placed before reset')
+  eq(signs.not_showable_count(), 1, 'hunk cache reset: not_showable incremented before reset')
+  ok(#system_calls == 1, 'hunk cache reset: git diff invoked once before reset', #system_calls)
+
+  -- Same path, but a fresh review session's git-diff result would now identity-map line 11
+  -- instead of dropping it. Without the plain_hunks_cache reset, the stale cached hunk
+  -- table would still apply and this assertion would fail.
+  system_result = { code = 0, stdout = '', stderr = '' }
+  resolved_threads.set_threads({ make_thread('hunkreset.lua', 'left', 11, 11, 'active') })
+  signs.refresh()
+  ok(#system_calls == 2, 'hunk cache reset: set_threads() forces git diff to re-run, not read from stale cache', #system_calls)
+  eq(marked_rows(buf_b), { 11 }, 'hunk cache reset: new hunks reflected in placement after reset')
+  eq(signs.not_showable_count(), 0, 'hunk cache reset: not_showable reflects the new hunk table')
+  restore_system()
+end
+
 -- No ctx / no ctx.base: plain_hunks_for cannot run git at all -- nil hunks, not_showable
 -- incremented, no vim.system call, and (matching M.refresh's own notify guard) no
 -- notification since there is no git stderr to report.
