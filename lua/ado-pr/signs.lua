@@ -132,7 +132,12 @@ end
 -- Self-computed hunk table for diff1_plain/diff1_raw, which attach no diffview diff
 -- renderer to read one from. `git diff <base>...HEAD -- <path>` is the exact range
 -- review.lua already opened diffview against, run against the review root captured at
--- open (never `vim.fn.getcwd()`, which can differ by refresh time).
+-- open (never `vim.fn.getcwd()`, which can differ by refresh time). `-U0` keeps every
+-- hunk a single contiguous change run with no surrounding context lines folded in --
+-- without it, git's default ~3 lines of context on each side can merge separate nearby
+-- changes into one hunk whose old_count/new_count then span unrelated context, which
+-- breaks paired_row's offset math below (it assumes old_count/new_count only cover
+-- genuinely changed lines).
 --
 -- Returns hunks, err. Only a `code == 0` result -- including a legitimately empty parse
 -- for an unchanged file -- is cached and returned as a table; no ctx, no `ctx.base`, no
@@ -148,7 +153,7 @@ local function plain_hunks_for(entry_path)
   if not (ctx and ctx.base and ctx.repo_root) then
     return nil
   end
-  local res = vim.system({ 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = ctx.repo_root }):wait()
+  local res = vim.system({ 'git', 'diff', '-U0', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = ctx.repo_root }):wait()
   if res.code ~= 0 then
     local detail = res.stderr ~= '' and res.stderr or ('exit ' .. res.code)
     return nil, detail

@@ -219,6 +219,32 @@ for _, layout in ipairs({ 'diff1_plain', 'diff1_raw' }) do
   eq(result.placements[1].lines, { 5, 6 }, layout .. ': shrink hunk paired rows only')
 end
 
+-- diff1_plain / diff1_raw: a growing hunk (new_count > old_count) pairs every old line
+-- 1:1 -- offset i is always within new_count when new_count > old_count.
+for _, layout in ipairs({ 'diff1_plain', 'diff1_raw' }) do
+  local hunks = { { old_start = 5, old_count = 1, new_start = 5, new_count = 3 } }
+  local signed_items = {
+    { thread = { status = 'active' }, path = 'f.lua', range = { side = 'left', line_start = 5, line_end = 5 } },
+  }
+  local result = signs.plan(layout, hunks, signed_items, 'f.lua', { b = 50 })
+  eq(result.not_showable, 0, layout .. ': growing hunk fully paired, not_showable 0')
+  ok(#result.placements == 1, layout .. ': growing hunk one placement')
+  eq(result.placements[1].lines, { 5 }, layout .. ': growing hunk paired row')
+end
+
+-- diff1_plain / diff1_raw: a thread range straddling a hunk boundary mixes an exact
+-- unchanged-region line (before the hunk) with paired in-hunk lines in one placement.
+for _, layout in ipairs({ 'diff1_plain', 'diff1_raw' }) do
+  local hunks = { { old_start = 5, old_count = 2, new_start = 5, new_count = 2 } }
+  local signed_items = {
+    { thread = { status = 'active' }, path = 'f.lua', range = { side = 'left', line_start = 4, line_end = 6 } },
+  }
+  local result = signs.plan(layout, hunks, signed_items, 'f.lua', { b = 50 })
+  eq(result.not_showable, 0, layout .. ': straddling range fully placed, not_showable 0')
+  ok(#result.placements == 1, layout .. ': straddling range one placement')
+  eq(result.placements[1].lines, { 4, 5, 6 }, layout .. ': straddling range mixes exact + paired rows')
+end
+
 -- diff1_inline: pairing is a plain/raw-only concern -- inline keeps anchoring every in-hunk
 -- line to the hang row regardless of pairing, unchanged by this fix.
 do
@@ -305,7 +331,7 @@ do
 
   ok(#system_calls == 1, 'refresh diff1_plain: git diff invoked once', #system_calls)
   local call = system_calls[1]
-  eq(call.cmd, { 'git', 'diff', 'deadbeef...HEAD', '--', 'plain.lua' }, 'refresh diff1_plain: git diff argv')
+  eq(call.cmd, { 'git', 'diff', '-U0', 'deadbeef...HEAD', '--', 'plain.lua' }, 'refresh diff1_plain: git diff argv')
   -- git runs against the stored review root, not vim.fn.getcwd() -- the review root
   -- ('/review-root') never matches the test process's real cwd.
   ok(call.opts and call.opts.cwd == '/review-root', 'refresh diff1_plain: git diff cwd is the stored repo_root', vim.inspect(call.opts))
@@ -331,6 +357,33 @@ do
   signs.refresh()
   eq(marked_rows(buf_b), { 5 }, 'refresh diff1_plain empty stdout: identity-mapped to its own row')
   eq(signs.not_showable_count(), 0, 'refresh diff1_plain empty stdout: not_showable 0')
+  restore_system()
+end
+
+-- -U0 keeps two nearby changes as separate, minimal hunks rather than letting git's
+-- default ~3 lines of context merge them into one hunk spanning both -- the merge is
+-- exactly what would break the offset-based pairing math in paired_row (a change run's
+-- old_count/new_count would include unrelated context lines from the other change). Two
+-- -U0 hunks a few lines apart pair independently and correctly.
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'nearby.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  system_result = { code = 0, stdout = '@@ -10,1 +10,1 @@\n-old10\n+new10\n@@ -14,1 +14,1 @@\n-old14\n+new14\n', stderr = '' }
+  signs.set_threads({
+    make_thread('nearby.lua', 'left', 10, 10, 'active'),
+    make_thread('nearby.lua', 'left', 14, 14, 'active'),
+  })
+  signs.refresh()
+  eq(marked_rows(buf_b), { 10, 14 }, '-U0: two nearby changes pair independently, not merged by context')
+  eq(signs.not_showable_count(), 0, '-U0: both nearby changes fully paired')
   restore_system()
 end
 
