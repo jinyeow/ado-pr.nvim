@@ -24,6 +24,11 @@ local M = {}
 --                   own virtual deletion lines hang from, and the honest anchor for any
 --                   in-hunk line: the row directly above the hunk (new_start - 1; may be
 --                   0 at file start -- callers clamp).
+--
+-- signs.lua's plain/raw pairing (hunk_containing/paired_row) computes its own per-line
+-- correspondence on top of this function's hunk table, for those two layouts only -- this
+-- function's own contract above is unchanged and still applies as-is to diff1_inline and
+-- to signs.lua's fallback-to-unshowable case.
 function M.old_line_to_row(hunks, old_line)
   local shift = 0
   for _, h in ipairs(hunks or {}) do
