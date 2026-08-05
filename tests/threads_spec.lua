@@ -397,14 +397,6 @@ for _, t in ipairs(human_threads) do
   table.insert(items, { thread = t, range = threads.resolve(t, nil) })
 end
 
-local function item_by_id(id)
-  for _, item in ipairs(items) do
-    if item.thread.id == id then
-      return item
-    end
-  end
-end
-
 local function ids(hits)
   local out = {}
   for i, h in ipairs(hits) do

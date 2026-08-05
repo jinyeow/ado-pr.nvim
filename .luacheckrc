@@ -1,6 +1,10 @@
 std = "luajit"
 globals = { "vim" }
 
+-- Match .stylua.toml's column_width so luacheck doesn't flag lines stylua
+-- itself considers fine.
+max_line_length = 160
+
 exclude_files = {
   "prototypes/",
 }
