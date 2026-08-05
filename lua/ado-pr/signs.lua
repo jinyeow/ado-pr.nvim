@@ -47,6 +47,12 @@ local marked_bufs = {}
 -- Self-computed diff1_plain/diff1_raw hunk table, keyed by path -- git-diff is only
 -- re-run when the file under the cursor changes, not on every WinEnter refresh.
 local plain_hunks_cache
+-- Last (path, error) a git-diff-failure notify fired for -- nil once the failure clears
+-- or hasn't happened yet. Failures are deliberately never cached (so a retry is always
+-- attempted), but M.refresh runs on every WinEnter, so without this the same failure would
+-- warn on every window switch. Reset by set_threads/attach so a new review session (or a
+-- re-fetch of threads) re-notifies rather than staying silent from a prior session.
+local last_notified_hunks_err
 
 -- Store the renderable threads for the active PR (a plain fetch -- no iteration window).
 -- Both left- and right-anchored threads are kept for signing; PR-level (no threadContext)
@@ -54,6 +60,7 @@ local plain_hunks_cache
 function M.set_threads(threads)
   signed, pr_level = {}, 0
   plain_hunks_cache = nil
+  last_notified_hunks_err = nil
   for _, t in ipairs(threads or {}) do
     if threads_mod.is_renderable(t) then
       local path = threads_mod.path(t)
@@ -124,19 +131,29 @@ end
 
 -- Self-computed hunk table for diff1_plain/diff1_raw, which attach no diffview diff
 -- renderer to read one from. `git diff <base>...HEAD -- <path>` is the exact range
--- review.lua already opened diffview against.
+-- review.lua already opened diffview against, run against the review root captured at
+-- open (never `vim.fn.getcwd()`, which can differ by refresh time).
+--
+-- Returns hunks, err. Only a `code == 0` result -- including a legitimately empty parse
+-- for an unchanged file -- is cached and returned as a table; no ctx, no `ctx.base`, no
+-- `ctx.repo_root` (guarded here rather than letting `vim.system` silently fall back to the
+-- process cwd), or a non-zero exit all return `nil` and write nothing to the cache, so the
+-- failure is neither mistaken for "no changes" (identity mapping) nor remembered past this
+-- refresh -- the next refresh naturally retries.
 local function plain_hunks_for(entry_path)
   if plain_hunks_cache and plain_hunks_cache.path == entry_path then
     return plain_hunks_cache.hunks
   end
-  local result_hunks = {}
   local ctx = state_mod.get()
-  if ctx and ctx.base then
-    local res = vim.system({ 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = vim.fn.getcwd() }):wait()
-    if res.code == 0 then
-      result_hunks = hunks_mod.parse_unified_hunks(res.stdout or '')
-    end
+  if not (ctx and ctx.base and ctx.repo_root) then
+    return nil
   end
+  local res = vim.system({ 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = ctx.repo_root }):wait()
+  if res.code ~= 0 then
+    local detail = res.stderr ~= '' and res.stderr or ('exit ' .. res.code)
+    return nil, detail
+  end
+  local result_hunks = hunks_mod.parse_unified_hunks(res.stdout or '')
   plain_hunks_cache = { path = entry_path, hunks = result_hunks }
   return result_hunks
 end
@@ -145,7 +162,15 @@ end
 -- diff1_inline always has a real row to sign (the row a pure deletion's virtual lines
 -- hang from); diff1_plain/diff1_raw do not, and a range that maps to zero exact rows
 -- is unshowable rather than being placed at a guessed row.
+--
+-- `hunks == nil` means the hunk table is unresolved (git-diff failed or was never
+-- attempted), not "no hunks in this file" -- treated as fully unshowable rather than
+-- falling through to identity mapping (an empty table `{}` is the legitimate "no
+-- changes" case and still maps identically).
 local function left_single_window_lines(layout, hunks, range)
+  if hunks == nil then
+    return {}, true
+  end
   local lines = {}
   local any_unshowable = false
   for line = range.line_start, range.line_end do
@@ -253,10 +278,15 @@ function M.refresh()
   -- diffview only computes a hunk table for inline layouts, and even there it can come
   -- back nil (no bufnr yet, or diffview.scene.inline_diff unavailable -- see
   -- diffview_state_spec.lua cases 9/10). Any single-window layout without one self-
-  -- computes from git, so a left-side line is never identity-mapped by omission.
-  local hunks
+  -- computes from git. A `nil` result (no ctx/base, or a failed `git diff`) stays `nil`
+  -- here too -- M.plan treats that as unresolved and counts affected threads toward
+  -- not_showable, never identity-mapping a left-side line by omission.
+  local hunks, hunks_err
   if not two_window then
-    hunks = state.hunks or plain_hunks_for(entry_path)
+    hunks = state.hunks
+    if not hunks then
+      hunks, hunks_err = plain_hunks_for(entry_path)
+    end
   end
 
   local result = M.plan(state.layout, hunks, signed, entry_path, line_counts)
@@ -264,6 +294,21 @@ function M.refresh()
   for _, p in ipairs(result.placements) do
     local win = p.target == 'a' and win_a or win_b
     place(win.bufnr, p.lines, p.kind)
+  end
+
+  -- Only a real git failure (stderr present, or an exit code when stderr is empty -- see
+  -- plain_hunks_for) is worth interrupting the user for -- no ctx/base is an ordinary "not
+  -- reviewing a PR yet" state, not a failure. Deduped against the last-notified (path,
+  -- error) pair: failures are never cached (so retry keeps happening on every WinEnter),
+  -- but the warning itself should only repeat when the failure is new or has changed.
+  if hunks_err then
+    local key = entry_path .. '\0' .. hunks_err
+    if key ~= last_notified_hunks_err then
+      vim.notify(('ado-pr: git diff failed for %s: %s'):format(entry_path, hunks_err), vim.log.levels.WARN)
+      last_notified_hunks_err = key
+    end
+  else
+    last_notified_hunks_err = nil
   end
 end
 
@@ -273,6 +318,7 @@ local group
 -- open. Torn down on DiffviewViewClosed so a closed review doesn't leave a WinEnter
 -- autocmd firing forever. Safe to call repeatedly (each review re-creates the group).
 function M.attach()
+  last_notified_hunks_err = nil
   group = vim.api.nvim_create_augroup('AdoPrThreads', { clear = true })
   vim.api.nvim_create_autocmd('User', {
     group = group,

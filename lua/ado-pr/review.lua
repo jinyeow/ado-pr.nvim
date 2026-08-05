@@ -12,14 +12,17 @@ local state = require('ado-pr.state')
 -- Record the active-PR context so :AdoPrComment knows which PR/repo to post to.
 -- The threads route wants the repository GUID, taken from the PR payload. `base` is the
 -- commit diffview was opened against -- signs.lua needs it to self-compute a hunk table
--- for diff1_plain/diff1_raw (docs/specs/left-side-thread-anchoring.md).
-local function capture_context(id, pr, base)
+-- for diff1_plain/diff1_raw (docs/specs/left-side-thread-anchoring.md). `repo_root` is the
+-- review worktree's cwd captured once here, so signs.lua never re-reads `vim.fn.getcwd()`
+-- at refresh time.
+local function capture_context(id, pr, base, repo_root)
   local repo = pr.repository or {}
   state.set({
     id = id,
     repositoryId = repo.id,
     project = (repo.project and repo.project.name) or config.get().project,
     base = base,
+    repo_root = repo_root,
   })
 end
 
@@ -52,12 +55,11 @@ end
 -- diffs against what ADO actually targeted (not a possibly-stale, possibly-
 -- wrong local ref). Runs with the review worktree as cwd. Returns
 -- (commit|nil, err|nil).
-local function resolve_base(pr)
+local function resolve_base(pr, cwd)
   local target_ref = pr.targetRefName
   if not target_ref or target_ref == '' then
     return nil, 'PR payload missing targetRefName'
   end
-  local cwd = vim.fn.getcwd()
   local fetch = fetch_target_ref(target_ref, cwd)
   if fetch.code ~= 0 then
     local detail = fetch.stderr ~= '' and fetch.stderr or ('exit ' .. fetch.code)
@@ -71,6 +73,7 @@ local function resolve_base(pr)
 end
 
 function M.open(id)
+  local cwd = vim.fn.getcwd()
   local ok, err = az.checkout(id)
   if not ok then
     vim.notify('ado-pr: checkout failed: ' .. err, vim.log.levels.ERROR)
@@ -82,7 +85,7 @@ function M.open(id)
     state.clear()
     return
   end
-  local base, berr = resolve_base(pr)
+  local base, berr = resolve_base(pr, cwd)
   if not base then
     vim.notify('ado-pr: ' .. berr, vim.log.levels.ERROR)
     return
@@ -95,7 +98,7 @@ function M.open(id)
   end
   -- Only now that the diff has actually opened does the active-PR state
   -- (which :AdoPrComment relies on) switch to this PR.
-  capture_context(id, pr, base)
+  capture_context(id, pr, base, cwd)
 
   local list, terr = az.list_threads(state.get())
   if not list then
