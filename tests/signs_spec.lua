@@ -363,6 +363,31 @@ do
   eq(signs.not_showable_count(), 0, 'git failure: not_showable reset for the unrelated refresh')
 end
 
+-- Git failure with empty stderr (non-zero exit, nothing written to stderr): the warning
+-- falls back to the exit code instead of rendering a blank detail, mirroring review.lua's
+-- `stderr ~= '' and stderr or ('exit ' .. code)` idiom.
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
+  local buf_fail = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'failsempty.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_fail } },
+    hunks = nil,
+  }
+  stub_system()
+  stub_notify()
+  system_result = { code = 7, stdout = '', stderr = '' }
+  signs.set_threads({ make_thread('failsempty.lua', 'left', 5, 5, 'active') })
+  signs.refresh()
+  ok(#notifications == 1, 'git failure empty stderr: notified once', #notifications)
+  local n = notifications[1]
+  ok(n and n.msg:find('exit 7', 1, true) ~= nil, 'git failure empty stderr: falls back to exit code', n and n.msg)
+  restore_system()
+  restore_notify()
+end
+
 -- No ctx / no ctx.base: plain_hunks_for cannot run git at all -- nil hunks, not_showable
 -- incremented, no vim.system call, and (matching M.refresh's own notify guard) no
 -- notification since there is no git stderr to report.

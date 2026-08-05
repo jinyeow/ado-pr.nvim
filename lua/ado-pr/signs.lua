@@ -142,7 +142,8 @@ local function plain_hunks_for(entry_path)
   end
   local res = vim.system({ 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = ctx.repo_root }):wait()
   if res.code ~= 0 then
-    return nil, res.stderr
+    local detail = res.stderr ~= '' and res.stderr or ('exit ' .. res.code)
+    return nil, detail
   end
   local result_hunks = hunks_mod.parse_unified_hunks(res.stdout or '')
   plain_hunks_cache = { path = entry_path, hunks = result_hunks }
@@ -287,8 +288,9 @@ function M.refresh()
     place(win.bufnr, p.lines, p.kind)
   end
 
-  -- Only a real git failure (stderr present) is worth interrupting the user for -- no
-  -- ctx/base is an ordinary "not reviewing a PR yet" state, not a failure.
+  -- Only a real git failure (stderr present, or an exit code when stderr is empty -- see
+  -- plain_hunks_for) is worth interrupting the user for -- no ctx/base is an ordinary "not
+  -- reviewing a PR yet" state, not a failure.
   if hunks_err then
     vim.notify(('ado-pr: git diff failed for %s: %s'):format(entry_path, hunks_err), vim.log.levels.WARN)
   end
