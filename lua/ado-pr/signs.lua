@@ -47,6 +47,12 @@ local marked_bufs = {}
 -- Self-computed diff1_plain/diff1_raw hunk table, keyed by path -- git-diff is only
 -- re-run when the file under the cursor changes, not on every WinEnter refresh.
 local plain_hunks_cache
+-- Last (path, error) a git-diff-failure notify fired for -- nil once the failure clears
+-- or hasn't happened yet. Failures are deliberately never cached (so a retry is always
+-- attempted), but M.refresh runs on every WinEnter, so without this the same failure would
+-- warn on every window switch. Reset by set_threads/attach so a new review session (or a
+-- re-fetch of threads) re-notifies rather than staying silent from a prior session.
+local last_notified_hunks_err
 
 -- Store the renderable threads for the active PR (a plain fetch -- no iteration window).
 -- Both left- and right-anchored threads are kept for signing; PR-level (no threadContext)
@@ -54,6 +60,7 @@ local plain_hunks_cache
 function M.set_threads(threads)
   signed, pr_level = {}, 0
   plain_hunks_cache = nil
+  last_notified_hunks_err = nil
   for _, t in ipairs(threads or {}) do
     if threads_mod.is_renderable(t) then
       local path = threads_mod.path(t)
@@ -290,9 +297,17 @@ function M.refresh()
 
   -- Only a real git failure (stderr present, or an exit code when stderr is empty -- see
   -- plain_hunks_for) is worth interrupting the user for -- no ctx/base is an ordinary "not
-  -- reviewing a PR yet" state, not a failure.
+  -- reviewing a PR yet" state, not a failure. Deduped against the last-notified (path,
+  -- error) pair: failures are never cached (so retry keeps happening on every WinEnter),
+  -- but the warning itself should only repeat when the failure is new or has changed.
   if hunks_err then
-    vim.notify(('ado-pr: git diff failed for %s: %s'):format(entry_path, hunks_err), vim.log.levels.WARN)
+    local key = entry_path .. '\0' .. hunks_err
+    if key ~= last_notified_hunks_err then
+      vim.notify(('ado-pr: git diff failed for %s: %s'):format(entry_path, hunks_err), vim.log.levels.WARN)
+      last_notified_hunks_err = key
+    end
+  else
+    last_notified_hunks_err = nil
   end
 end
 
@@ -302,6 +317,7 @@ local group
 -- open. Torn down on DiffviewViewClosed so a closed review doesn't leave a WinEnter
 -- autocmd firing forever. Safe to call repeatedly (each review re-creates the group).
 function M.attach()
+  last_notified_hunks_err = nil
   group = vim.api.nvim_create_augroup('AdoPrThreads', { clear = true })
   vim.api.nvim_create_autocmd('User', {
     group = group,

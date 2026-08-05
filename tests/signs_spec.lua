@@ -342,10 +342,18 @@ do
   ok(n and n.level == vim.log.levels.WARN, 'git failure: notification is WARN')
   ok(n and n.msg:find('boom', 1, true) ~= nil, 'git failure: notification includes git stderr', n and n.msg)
 
-  -- A second refresh on the same failing path re-runs git (failure was never cached).
+  -- A second refresh on the same failing path re-runs git (failure was never cached), but
+  -- the notification is deduped -- an unchanged failure does not warn again.
   signs.refresh()
   ok(#system_calls == 2, 'git failure: not cached, second refresh re-invokes git', #system_calls)
-  ok(#notifications == 2, 'git failure: notified again on retry', #notifications)
+  ok(#notifications == 1, 'git failure: unchanged failure not re-notified', #notifications)
+
+  -- A changed error message on the same path re-notifies.
+  system_result = { code = 1, stdout = '', stderr = 'kaboom' }
+  signs.refresh()
+  ok(#notifications == 2, 'git failure: changed error message re-notifies', #notifications)
+  local n2 = notifications[2]
+  ok(n2 and n2.msg:find('kaboom', 1, true) ~= nil, 'git failure: new notification includes new stderr', n2 and n2.msg)
   restore_system()
   restore_notify()
 
@@ -384,6 +392,42 @@ do
   ok(#notifications == 1, 'git failure empty stderr: notified once', #notifications)
   local n = notifications[1]
   ok(n and n.msg:find('exit 7', 1, true) ~= nil, 'git failure empty stderr: falls back to exit code', n and n.msg)
+  restore_system()
+  restore_notify()
+end
+
+-- Tracker reset: set_threads() and attach() both clear the last-notified git-diff-failure
+-- key, so a fresh review session (or a re-fetch of threads) re-notifies an unchanged
+-- failure rather than staying silent because of a previous session's suppression.
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
+  local buf_fail = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'reset.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_fail } },
+    hunks = nil,
+  }
+  stub_system()
+  stub_notify()
+  system_result = { code = 1, stdout = '', stderr = 'boom' }
+  signs.set_threads({ make_thread('reset.lua', 'left', 5, 5, 'active') })
+  signs.refresh()
+  signs.refresh()
+  ok(#notifications == 1, 'tracker reset: unchanged failure only notified once before reset', #notifications)
+
+  signs.set_threads({ make_thread('reset.lua', 'left', 5, 5, 'active') })
+  signs.refresh()
+  ok(#notifications == 2, 'tracker reset: set_threads() resets the tracker, same failure re-notifies', #notifications)
+
+  signs.attach()
+  signs.refresh()
+  ok(#notifications == 3, 'tracker reset: attach() resets the tracker, same failure re-notifies', #notifications)
+  -- attach() creates a real WinEnter/User autocmd group; tear it down so it doesn't
+  -- fire against later tests' buffers/snapshots.
+  vim.api.nvim_del_augroup_by_name('AdoPrThreads')
+
   restore_system()
   restore_notify()
 end
