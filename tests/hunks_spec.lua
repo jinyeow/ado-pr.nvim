@@ -88,6 +88,23 @@ do
   ok(row == 0 and exact == false, 'whole-hunk deletion at file start: row 0', tostring(row))
 end
 
+-- A pure-insertion hunk (old_count == 0) names an unchanged line at old_start, not a
+-- touched one -- that line must stay unshifted. Only the line after it picks up the
+-- insertion's shift.
+do
+  local h = { { old_start = 8, old_count = 0, new_start = 9, new_count = 3 } }
+  eq({ hunks.old_line_to_row(h, 8) }, { 8, true }, 'pure insertion: boundary line at old_start is unshifted')
+  eq({ hunks.old_line_to_row(h, 9) }, { 12, true }, 'pure insertion: line after old_start gets the shift')
+  eq({ hunks.old_line_to_row(h, 5) }, { 5, true }, 'pure insertion: line well before hunk is unaffected')
+end
+
+-- A pure-insertion hunk at the very top of the file (old_start == 0): old_line 1 is the
+-- first real line, already after the insertion, so it gets the shift.
+do
+  local h = { { old_start = 0, old_count = 0, new_start = 1, new_count = 2 } }
+  eq({ hunks.old_line_to_row(h, 1) }, { 3, true }, 'pure insertion at file start: shifted')
+end
+
 -- Multiple hunks: mapping accumulates shift across all hunks before the target line.
 do
   local h = {
