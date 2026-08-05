@@ -209,9 +209,9 @@ local function left_single_window_lines(layout, hunks, range)
       table.insert(lines, row)
     else
       local h = hunk_containing(hunks, line)
-      local pr = h and paired_row(h, line)
-      if pr then
-        table.insert(lines, pr)
+      local paired = h and paired_row(h, line)
+      if paired then
+        table.insert(lines, paired)
       else
         any_unshowable = true
       end
