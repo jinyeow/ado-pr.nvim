@@ -8,6 +8,20 @@
 -- signs.lua -- see docs/specs/pr-comment-threads.md "What is not unit-tested".
 package.path = './lua/?.lua;./lua/?/init.lua;' .. package.path
 
+-- Stub for the cross-tab event-bleed test below: diffview_state.current()
+-- requires 'diffview.lib' lazily inside its body, so a package.loaded stub
+-- installed before require is picked up on every call (same technique
+-- tests/diffview_state_spec.lua and issue #25's clamp tests use). Keyed by
+-- the *actual* current tabpage, same as diffview.lib's real
+-- get_current_view() would be -- there is exactly one "current" view at a
+-- time, no matter how many sessions are attached.
+local views_by_tab = {}
+package.loaded['diffview.lib'] = {
+  get_current_view = function()
+    return views_by_tab[vim.api.nvim_get_current_tabpage()]
+  end,
+}
+
 local view = require('ado-pr.view')
 
 local failures, count = {}, 0
@@ -192,12 +206,18 @@ do
   ok(view.is_open(tab2), 'cursor move in tab 2: session 2 pane untouched')
 
   -- Register each session's per-file cursor-follower autocmds (normally done
-  -- on DiffviewDiffBufWinEnter/DiffviewViewOpened) so the teardown check
-  -- below observes a real augroup, not one that was never created.
+  -- on DiffviewDiffBufWinEnter/DiffviewViewOpened). Each session only reacts
+  -- to an event fired while its OWN tab is focused (the tab-focus guard --
+  -- see the cross-tab bleed test below for why), so each needs its own
+  -- firing with that tab focused.
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewOpened', modeline = false })
+  vim.wait(20)
+  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadViewCursor' .. tostring(tab2) }), 'DiffviewViewOpened: session 2 cursor augroup created')
+
+  vim.api.nvim_set_current_tabpage(tab1)
   vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewOpened', modeline = false })
   vim.wait(20)
   ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadViewCursor' .. tostring(tab1) }), 'DiffviewViewOpened: session 1 cursor augroup created')
-  ok(pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreadViewCursor' .. tostring(tab2) }), 'DiffviewViewOpened: session 2 cursor augroup created')
 
   -- Closing session 2's pane must close only session 2's, not session 1's.
   view.close(tab2)
@@ -209,6 +229,7 @@ do
   -- against diffview.nvim's source -- the event carries no per-view data).
   -- Both sessions' handlers run off the same global event; only the one
   -- whose own captured tab just went invalid should tear itself down.
+  vim.api.nvim_set_current_tabpage(tab2)
   vim.cmd('tabclose') -- closes tab2, returns focus to tab1
   vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewClosed', modeline = false })
   vim.wait(20)
@@ -232,6 +253,64 @@ do
 
   view.close(tab1)
   ok(not view.is_open(tab1), 'close(tab1): session 1 pane closed')
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewClosed', modeline = false })
+  vim.wait(20)
+end
+
+-- ---------------------------------------------------------------------------
+-- Cross-tab event bleed: DiffviewDiffBufWinEnter/DiffviewViewOpened are
+-- global User events with no per-view payload, so *every* attached session's
+-- handler runs on *any* tab's event -- including a session whose own tab
+-- isn't the one that changed. Before the tab-focus guard, a stale session's
+-- handler read diffview_state.current() (whichever tab is actually focused
+-- when the deferred callback runs, not its own captured tab) and re-pointed
+-- its cursor-follower augroup at the *other* tab's buffer -- so session 1's
+-- pane silently started following session 2's cursor instead of its own.
+-- ---------------------------------------------------------------------------
+do
+  local function cursor_group_buffer(tab)
+    local autocmds = vim.api.nvim_get_autocmds({ group = 'AdoPrThreadViewCursor' .. tostring(tab), event = 'CursorMoved' })
+    return autocmds[1] and autocmds[1].buffer
+  end
+
+  local tab1 = vim.api.nvim_get_current_tabpage()
+  local win1 = vim.api.nvim_get_current_win()
+  local buf1 = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_win_set_buf(win1, buf1)
+  views_by_tab[tab1] = {
+    cur_entry = { path = 'f1.lua', oldpath = nil, status = 'M' },
+    cur_layout = { name = 'diff1_plain', symbols = { 'b' }, b = { id = win1, file = { bufnr = buf1 } } },
+  }
+  view.attach()
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewOpened', modeline = false })
+  vim.wait(20)
+  eq(cursor_group_buffer(tab1), buf1, 'cross-tab bleed: session 1 cursor group starts bound to its own buffer')
+
+  vim.cmd('tabnew')
+  local tab2 = vim.api.nvim_get_current_tabpage()
+  local win2 = vim.api.nvim_get_current_win()
+  local buf2 = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_win_set_buf(win2, buf2)
+  views_by_tab[tab2] = {
+    cur_entry = { path = 'f2.lua', oldpath = nil, status = 'M' },
+    cur_layout = { name = 'diff1_plain', symbols = { 'b' }, b = { id = win2, file = { bufnr = buf2 } } },
+  }
+  view.attach()
+
+  -- Fire the event while tab2 is focused: this is the moment a stale
+  -- session's handler used to misread diffview_state.current() as tab2's
+  -- view instead of its own tab1's.
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewOpened', modeline = false })
+  vim.wait(20)
+  eq(cursor_group_buffer(tab1), buf1, 'cross-tab bleed: session 1 cursor group still bound to its own buffer, not session 2 buffer')
+  eq(cursor_group_buffer(tab2), buf2, 'cross-tab bleed: session 2 cursor group bound to its own buffer')
+
+  -- Clean up: close both sessions/tabs so later tests start from a clean tab state.
+  view.close(tab2)
+  vim.cmd('tabclose')
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewClosed', modeline = false })
+  vim.wait(20)
+  view.close(tab1)
   vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewClosed', modeline = false })
   vim.wait(20)
 end

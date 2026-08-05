@@ -280,6 +280,16 @@ function M.attach()
     group = group,
     pattern = { 'DiffviewDiffBufWinEnter', 'DiffviewViewOpened' },
     callback = vim.schedule_wrap(function()
+      -- These are global User events with no per-view payload, so *every*
+      -- attached session's handler fires on *any* tab's event -- including
+      -- one whose own tab isn't the tab that actually changed.
+      -- diffview_state.current() always reflects the currently-focused tab,
+      -- not this handler's captured `tab`, so without this guard a stale
+      -- session would read the wrong tab's windows and re-point its own
+      -- keymaps/cursor-follower autocmds/pane content at them.
+      if vim.api.nvim_get_current_tabpage() ~= tab then
+        return
+      end
       setup_keymaps()
       register_cursor_autocmds(tab)
       M.refresh(tab)
