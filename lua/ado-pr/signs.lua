@@ -14,9 +14,11 @@
 -- diff1_raw do the same offset mapping but have no anchor for a genuine deletion, so those
 -- threads count toward M.not_showable_count() instead of guessing a row.
 --
--- Untested: thin glue over diffview internals, git and Neovim's window/buffer API with no
--- seam worth mocking (same call as anchor.lua's M.current / diffview_state.lua), validated
--- by smoke test against a live PR. Filtering, range math and the hunk mapping live in
+-- M.plan is the pure placement plan (layout branch selection, hunk mapping, not_showable
+-- accounting) -- tested directly in signs_spec.lua. M.refresh() itself stays thin,
+-- untested glue over diffview internals, git and Neovim's window/buffer API with no seam
+-- worth mocking beyond M.plan (same call as anchor.lua's M.current / diffview_state.lua),
+-- validated by smoke test against a live PR. Filtering and range math live in
 -- threads.lua / hunks.lua, tested there.
 local M = {}
 
@@ -81,27 +83,17 @@ function M.not_showable_count()
   return not_showable
 end
 
--- Mark `lines` (explicit buffer rows, not necessarily contiguous -- several old lines can
--- collapse onto the same anchor row) in `buf`. Duplicate rows mark once; the first
--- surviving row gets the start glyph, the rest the range glyph.
-local function place(buf, line_count, lines, thread)
-  local kind = threads_mod.is_resolved(thread) and 'resolved' or 'active'
+-- Mark `lines` (explicit buffer rows, already clamped and de-duplicated by M.plan) in
+-- `buf`. The first row gets the start glyph, the rest the range glyph.
+local function place(buf, lines, kind)
   local hl = HL[kind]
-  local seen = {}
-  local marked_any = false
-  for _, line in ipairs(lines) do
-    local clamped = threads_mod.clamp({ line_start = line, line_end = line }, line_count)
-    local l = clamped.line_start
-    if l ~= 0 and not seen[l] then
-      seen[l] = true
-      vim.api.nvim_buf_set_extmark(buf, ns, l - 1, 0, {
-        sign_text = marked_any and RANGE_SIGN or START_SIGN[kind],
-        sign_hl_group = hl,
-      })
-      marked_any = true
-    end
+  for i, line in ipairs(lines) do
+    vim.api.nvim_buf_set_extmark(buf, ns, line - 1, 0, {
+      sign_text = i == 1 and START_SIGN[kind] or RANGE_SIGN,
+      sign_hl_group = hl,
+    })
   end
-  if marked_any then
+  if #lines > 0 then
     marked_bufs[buf] = true
   end
 end
@@ -112,6 +104,22 @@ local function range_lines(range)
     table.insert(lines, line)
   end
   return lines
+end
+
+-- Clamp `lines` into [1, line_count] and drop duplicates/out-of-range zeros -- several old
+-- lines can collapse onto the same anchor row, and a stale thread range can run past the
+-- current buffer's end.
+local function clamped_dedup_lines(lines, line_count)
+  local out, seen = {}, {}
+  for _, line in ipairs(lines) do
+    local clamped = threads_mod.clamp({ line_start = line, line_end = line }, line_count)
+    local l = clamped.line_start
+    if l ~= 0 and not seen[l] then
+      seen[l] = true
+      table.insert(out, l)
+    end
+  end
+  return out
 end
 
 -- Self-computed hunk table for diff1_plain/diff1_raw, which attach no diffview diff
@@ -136,7 +144,7 @@ end
 -- Map a left-side thread's range through the hunk table for single-window layouts.
 -- diff1_inline always has a real row to sign (the row a pure deletion's virtual lines
 -- hang from); diff1_plain/diff1_raw do not, and a range that maps to zero exact rows
--- counts toward M.not_showable_count() instead of being marked anywhere.
+-- is unshowable rather than being placed at a guessed row.
 local function left_single_window_lines(layout, hunks, range)
   local lines = {}
   local any_unshowable = false
@@ -148,10 +156,53 @@ local function left_single_window_lines(layout, hunks, range)
       any_unshowable = true
     end
   end
-  if #lines == 0 and any_unshowable then
-    not_showable = not_showable + 1
+  return lines, any_unshowable
+end
+
+-- Pure placement plan: no vim.api, vim.system or diffview state -- deterministic
+-- table-in/table-out, so layout branch selection and the hunk mapping are testable
+-- without a live diffview view. `line_counts` is `{ a = <int|nil>, b = <int> }`: `a` set
+-- only for two-window layouts, `b` always (mirrors diffview_state.current().windows).
+--
+-- `signed_items` is `M.set_threads`'s own shape: `{ { thread, path, range }, ... }`, not
+-- yet filtered to `entry_path` -- M.plan does that filtering itself, same as M.refresh
+-- did before this extraction.
+--
+-- Returns `{ placements, not_showable }`. Each placement is
+-- `{ target = 'a'|'b', lines = <int[]>, kind = 'active'|'resolved' }` -- clamped,
+-- de-duplicated buffer rows ready for direct extmark placement (see `place` above).
+function M.plan(layout_kind, hunks, signed_items, entry_path, line_counts)
+  local placements = {}
+  local plan_not_showable = 0
+  local two_window = line_counts.a ~= nil
+
+  for _, item in ipairs(signed_items) do
+    if item.path == entry_path then
+      local kind = threads_mod.is_resolved(item.thread) and 'resolved' or 'active'
+      if item.range.side == 'right' then
+        local lines = clamped_dedup_lines(range_lines(item.range), line_counts.b)
+        if #lines > 0 then
+          table.insert(placements, { target = 'b', lines = lines, kind = kind })
+        end
+      elseif two_window then
+        local lines = clamped_dedup_lines(range_lines(item.range), line_counts.a)
+        if #lines > 0 then
+          table.insert(placements, { target = 'a', lines = lines, kind = kind })
+        end
+      else
+        local raw_lines, unshowable = left_single_window_lines(layout_kind, hunks, item.range)
+        if unshowable then
+          plan_not_showable = plan_not_showable + 1
+        end
+        local lines = clamped_dedup_lines(raw_lines, line_counts.b)
+        if #lines > 0 then
+          table.insert(placements, { target = 'b', lines = lines, kind = kind })
+        end
+      end
+    end
   end
-  return lines
+
+  return { placements = placements, not_showable = plan_not_showable }
 end
 
 -- Signed items (thread + resolved range) for one repo-relative path, normalised.
@@ -169,8 +220,8 @@ end
 
 -- Re-render signs in diffview's current diff buffer(s) for the file under the cursor. A
 -- multi-line thread is marked across its whole span, not only at its first line. Threads
--- on files outside the current diff scope are skipped by the path match below. Every
--- buffer marked by a previous call is cleared first, so switching layouts re-derives
+-- on files outside the current diff scope are skipped (M.plan filters by entry_path).
+-- Every buffer marked by a previous call is cleared first, so switching layouts re-derives
 -- placement from scratch rather than leaving stale marks in a buffer the new layout no
 -- longer signs into. Safe to call with no active diffview view (no-op).
 function M.refresh()
@@ -194,8 +245,10 @@ function M.refresh()
   local two_window = win_a and win_a.bufnr
 
   local entry_path = threads_mod.norm_repo_path(state.entry.path)
-  local line_count_b = vim.api.nvim_buf_line_count(win_b.bufnr)
-  local line_count_a = two_window and vim.api.nvim_buf_line_count(win_a.bufnr)
+  local line_counts = { b = vim.api.nvim_buf_line_count(win_b.bufnr) }
+  if two_window then
+    line_counts.a = vim.api.nvim_buf_line_count(win_a.bufnr)
+  end
 
   -- diffview only computes a hunk table for inline layouts, and even there it can come
   -- back nil (no bufnr yet, or diffview.scene.inline_diff unavailable -- see
@@ -206,17 +259,11 @@ function M.refresh()
     hunks = state.hunks or plain_hunks_for(entry_path)
   end
 
-  for _, item in ipairs(M.items_for(entry_path)) do
-    if item.range.side == 'right' then
-      place(win_b.bufnr, line_count_b, range_lines(item.range), item.thread)
-    elseif two_window then
-      place(win_a.bufnr, line_count_a, range_lines(item.range), item.thread)
-    else
-      local lines = left_single_window_lines(state.layout, hunks, item.range)
-      if #lines > 0 then
-        place(win_b.bufnr, line_count_b, lines, item.thread)
-      end
-    end
+  local result = M.plan(state.layout, hunks, signed, entry_path, line_counts)
+  not_showable = result.not_showable
+  for _, p in ipairs(result.placements) do
+    local win = p.target == 'a' and win_a or win_b
+    place(win.bufnr, p.lines, p.kind)
   end
 end
 
