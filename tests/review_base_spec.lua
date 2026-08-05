@@ -32,9 +32,6 @@ package.loaded['ado-pr.signs'] = {
   pr_level_count = function()
     return 0
   end,
-  not_showable_count = function()
-    return 0
-  end,
 }
 
 -- ado-pr.view is the same kind of untested adapter (thin glue over diffview/Neovim
