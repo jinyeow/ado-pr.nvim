@@ -232,6 +232,20 @@ for _, layout in ipairs({ 'diff1_plain', 'diff1_raw' }) do
   eq(result.placements[1].lines, { 5 }, layout .. ': growing hunk paired row')
 end
 
+-- diff1_plain / diff1_raw: an earlier hunk in the same file has already shifted line
+-- numbers, so this hunk's new_start differs from its old_start -- pairing must use the
+-- hunk's own old_start/new_start, not assume they match.
+for _, layout in ipairs({ 'diff1_plain', 'diff1_raw' }) do
+  local hunks = { { old_start = 20, old_count = 2, new_start = 23, new_count = 2 } }
+  local signed_items = {
+    { thread = { status = 'active' }, path = 'f.lua', range = { side = 'left', line_start = 20, line_end = 21 } },
+  }
+  local result = signs.plan(layout, hunks, signed_items, 'f.lua', { b = 50 })
+  eq(result.not_showable, 0, layout .. ': asymmetric hunk fully paired, not_showable 0')
+  ok(#result.placements == 1, layout .. ': asymmetric hunk one placement')
+  eq(result.placements[1].lines, { 23, 24 }, layout .. ': asymmetric hunk paired rows shifted by new_start - old_start')
+end
+
 -- diff1_plain / diff1_raw: a thread range straddling a hunk boundary mixes an exact
 -- unchanged-region line (before the hunk) with paired in-hunk lines in one placement.
 for _, layout in ipairs({ 'diff1_plain', 'diff1_raw' }) do
