@@ -58,9 +58,10 @@ lua/ado-pr/
   az.lua       az CLI + `az devops invoke` glue (reads, checkout, vote, post thread)
   anchor.lua   diffview cursor → (filePath, line, side) ADO thread anchor (pure + adapter)
   threads.lua  filter + read-resolve ADO PR comment threads (pure: no Neovim API, no network)
-  signs.lua    thread markers in diffview's diff buffers, both sides (adapter over threads.lua + hunks.lua + diffview_state)
+  resolved_threads.lua  per-PR resolved-thread collection (path, range) shared by signs.lua + view.lua
+  signs.lua    thread markers in diffview's diff buffers, both sides (adapter over resolved_threads.lua + hunks.lua + diffview_state)
   hunks.lua    map an old-side line through a hunk table to its new-buffer row (pure: no Neovim API, no diffview, no git)
-  view.lua     thread follower pane: split below the diff, tracks the cursor, ]t/[t (adapter)
+  view.lua     thread follower pane: split below the diff, tracks the cursor, ]t/[t (adapter over resolved_threads.lua)
   diffview_state.lua  active diffview view: entry, layout kind, per-side win/buf, inline hunks
   state.lua    active-PR context (id/repoId/project/base) for the review session
   review.lua   checkout → fetch PR target ref → DiffviewOpen target...HEAD; post/sign comment threads
