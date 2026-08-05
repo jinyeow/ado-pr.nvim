@@ -47,16 +47,6 @@ package.loaded['ado-pr.view'] = {
   end,
 }
 
--- ado-pr.view is the same kind of untested adapter (thin glue over diffview/Neovim
--- internals -- see view.lua's own header); stub it here too so review.open's WIRING
--- into it is assertable without actually opening a split window per test case.
-local view_calls
-package.loaded['ado-pr.view'] = {
-  attach = function()
-    table.insert(view_calls, { fn = 'attach' })
-  end,
-}
-
 local az = require('ado-pr.az')
 local review = require('ado-pr.review')
 local state = require('ado-pr.state')
