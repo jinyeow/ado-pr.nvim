@@ -82,10 +82,13 @@ function M.pr_level_count()
   return pr_level
 end
 
--- Left-side threads whose position has no real row in the current single-window layout
--- (diff1_plain/diff1_raw, a line inside a genuine deletion) -- surfaced as a count, never
--- a guessed position. Reset on every M.refresh() call, so it reflects the file/layout
--- under the cursor now.
+-- Count of left-side threads with at least one unpairable line in the current
+-- single-window layout (diff1_plain/diff1_raw, a line inside a genuine deletion with no
+-- new-side counterpart) -- surfaced as a count, never a guessed position. A thread can
+-- both contribute here and still get a placement: a range spanning a shrink hunk pairs
+-- its in-range lines and counts the excess unpairable ones, so it's neither fully placed
+-- nor fully hidden. Reset on every M.refresh() call, so it reflects the file/layout under
+-- the cursor now.
 function M.not_showable_count()
   return not_showable
 end
@@ -132,7 +135,12 @@ end
 -- Self-computed hunk table for diff1_plain/diff1_raw, which attach no diffview diff
 -- renderer to read one from. `git diff <base>...HEAD -- <path>` is the exact range
 -- review.lua already opened diffview against, run against the review root captured at
--- open (never `vim.fn.getcwd()`, which can differ by refresh time).
+-- open (never `vim.fn.getcwd()`, which can differ by refresh time). `-U0` keeps every
+-- hunk a single contiguous change run with no surrounding context lines folded in --
+-- without it, git's default ~3 lines of context on each side can merge separate nearby
+-- changes into one hunk whose old_count/new_count then span unrelated context, which
+-- breaks paired_row's offset math below (it assumes old_count/new_count only cover
+-- genuinely changed lines).
 --
 -- Returns hunks, err. Only a `code == 0` result -- including a legitimately empty parse
 -- for an unchanged file -- is cached and returned as a table; no ctx, no `ctx.base`, no
@@ -148,7 +156,7 @@ local function plain_hunks_for(entry_path)
   if not (ctx and ctx.base and ctx.repo_root) then
     return nil
   end
-  local res = vim.system({ 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = ctx.repo_root }):wait()
+  local res = vim.system({ 'git', 'diff', '-U0', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = ctx.repo_root }):wait()
   if res.code ~= 0 then
     local detail = res.stderr ~= '' and res.stderr or ('exit ' .. res.code)
     return nil, detail
@@ -158,10 +166,35 @@ local function plain_hunks_for(entry_path)
   return result_hunks
 end
 
+-- Find the hunk `old_line` falls inside, if any. old_line_to_row already does this walk
+-- internally but only reports the anchor row, not the hunk itself -- pairing needs the
+-- hunk's own old_start/new_start/new_count to compute a per-line offset.
+local function hunk_containing(hunks, old_line)
+  for _, h in ipairs(hunks or {}) do
+    if old_line >= h.old_start and old_line < h.old_start + h.old_count then
+      return h
+    end
+  end
+  return nil
+end
+
+-- A 1:1 replacement pairing for an in-hunk old line: offset i = old_line - old_start maps
+-- to new row new_start + i, same row diffview's own renderer shows the replacement on --
+-- but only while i is still within the hunk's new range. An old line at offset >= new_count
+-- has no new-side counterpart at all (genuinely deleted), so it is not paired.
+local function paired_row(h, old_line)
+  local i = old_line - h.old_start
+  if i < h.new_count then
+    return h.new_start + i
+  end
+  return nil
+end
+
 -- Map a left-side thread's range through the hunk table for single-window layouts.
 -- diff1_inline always has a real row to sign (the row a pure deletion's virtual lines
--- hang from); diff1_plain/diff1_raw do not, and a range that maps to zero exact rows
--- is unshowable rather than being placed at a guessed row.
+-- hang from), so every in-hunk line anchors there regardless of pairing. diff1_plain/
+-- diff1_raw have no such anchor: an in-hunk old line is placed at its paired row when one
+-- exists, and only falls back to unshowable when it doesn't (a genuine deletion).
 --
 -- `hunks == nil` means the hunk table is unresolved (git-diff failed or was never
 -- attempted), not "no hunks in this file" -- treated as fully unshowable rather than
@@ -178,7 +211,13 @@ local function left_single_window_lines(layout, hunks, range)
     if exact or INLINE_LAYOUTS[layout] then
       table.insert(lines, row)
     else
-      any_unshowable = true
+      local h = hunk_containing(hunks, line)
+      local paired = h and paired_row(h, line)
+      if paired then
+        table.insert(lines, paired)
+      else
+        any_unshowable = true
+      end
     end
   end
   return lines, any_unshowable
