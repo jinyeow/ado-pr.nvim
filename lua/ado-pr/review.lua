@@ -6,6 +6,7 @@ local az = require('ado-pr.az')
 local anchor = require('ado-pr.anchor')
 local config = require('ado-pr.config')
 local signs = require('ado-pr.signs')
+local resolved_threads = require('ado-pr.resolved_threads')
 local view = require('ado-pr.view')
 local state = require('ado-pr.state')
 
@@ -105,7 +106,7 @@ function M.open(id)
     vim.notify('ado-pr: could not load PR comment threads: ' .. (terr or 'unknown error'), vim.log.levels.WARN)
     list = {}
   end
-  signs.set_threads(list)
+  resolved_threads.set_threads(list)
   signs.attach()
   signs.refresh()
   -- The follower pane depends on Diffview window/scene APIs (and its teardown
@@ -116,7 +117,7 @@ function M.open(id)
   else
     vim.notify('ado-pr: thread follower pane needs diffview.nvim', vim.log.levels.INFO)
   end
-  local pr_level = signs.pr_level_count()
+  local pr_level = resolved_threads.pr_level_count()
   if pr_level > 0 then
     vim.notify(('ado-pr: %d PR-level thread%s'):format(pr_level, pr_level == 1 and '' or 's'), vim.log.levels.INFO)
   end

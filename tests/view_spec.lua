@@ -25,7 +25,7 @@ package.loaded['diffview.lib'] = {
 }
 
 local view = require('ado-pr.view')
-local signs = require('ado-pr.signs')
+local resolved_threads = require('ado-pr.resolved_threads')
 
 local failures, count = {}, 0
 local function ok(cond, name, detail)
@@ -351,7 +351,7 @@ do
   local buf = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
   set_view('jump.lua', win, buf)
-  signs.set_threads({ right_thread(1, 2, 2), right_thread(2, 50, 52) })
+  resolved_threads.set_threads({ right_thread(1, 2, 2), right_thread(2, 50, 52) })
 
   vim.api.nvim_win_set_cursor(win, { 1, 0 })
   view.jump(1)
@@ -375,7 +375,7 @@ do
   local buf = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
   set_view('jump.lua', win, buf)
-  signs.set_threads({ right_thread(1, -3, -1) })
+  resolved_threads.set_threads({ right_thread(1, -3, -1) })
 
   vim.api.nvim_win_set_cursor(win, { 1, 0 })
   local ok_call = pcall(view.jump, 1)
@@ -391,7 +391,7 @@ do
   local buf = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3' })
   set_view('jump.lua', win, buf)
-  signs.set_threads({ right_thread(1, 2, 2) })
+  resolved_threads.set_threads({ right_thread(1, 2, 2) })
   vim.api.nvim_win_set_cursor(win, { 1, 0 })
 
   local orig_line_count = vim.api.nvim_buf_line_count
@@ -420,7 +420,7 @@ do
   local buf = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
   set_view('jump.lua', win, buf)
-  signs.set_threads({ right_thread(1, 2, 2), right_thread(2, 50, 52) })
+  resolved_threads.set_threads({ right_thread(1, 2, 2), right_thread(2, 50, 52) })
 
   vim.api.nvim_win_set_cursor(win, { 1, 0 })
   view.jump(1)
@@ -463,7 +463,7 @@ do
   local buf = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
   set_view('jump.lua', win, buf)
-  signs.set_threads({ right_thread(1, 4, 4), right_thread(2, -3, -1) })
+  resolved_threads.set_threads({ right_thread(1, 4, 4), right_thread(2, -3, -1) })
 
   vim.api.nvim_win_set_cursor(win, { 5, 0 })
   view.jump(-1)
@@ -489,7 +489,7 @@ do
   local buf = vim.api.nvim_get_current_buf()
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
   set_view('jump.lua', win, buf)
-  signs.set_threads({ right_thread(1, 2, 2), right_thread(2, 50, 52), right_thread(3, 60, 62) })
+  resolved_threads.set_threads({ right_thread(1, 2, 2), right_thread(2, 50, 52), right_thread(3, 60, 62) })
 
   vim.api.nvim_win_set_cursor(win, { 1, 0 })
   view.jump(1)

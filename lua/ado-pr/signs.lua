@@ -23,6 +23,7 @@
 local M = {}
 
 local threads_mod = require('ado-pr.threads')
+local resolved_threads = require('ado-pr.resolved_threads')
 local diffview_state = require('ado-pr.diffview_state')
 local hunks_mod = require('ado-pr.hunks')
 local state_mod = require('ado-pr.state')
@@ -37,9 +38,6 @@ local RANGE_SIGN = '│'
 -- its virtual deletion lines hang from). diff1_plain/diff1_raw do not.
 local INLINE_LAYOUTS = { diff1_inline = true, diff1_inline_pinned = true }
 
--- { { thread = <thread>, path = <repo-relative, forward-slash>, range = { side, line_start, line_end } } }
-local signed = {}
-local pr_level = 0
 local not_showable = 0
 -- Every buffer M.refresh() marked extmarks in last call, so a layout switch clears them
 -- even when the new layout no longer signs into that buffer/window at all.
@@ -50,45 +48,25 @@ local plain_hunks_cache
 -- Last (path, error) a git-diff-failure notify fired for -- nil once the failure clears
 -- or hasn't happened yet. Failures are deliberately never cached (so a retry is always
 -- attempted), but M.refresh runs on every WinEnter, so without this the same failure would
--- warn on every window switch. Reset by set_threads/attach so a new review session (or a
--- re-fetch of threads) re-notifies rather than staying silent from a prior session.
+-- warn on every window switch. Reset whenever resolved_threads.all() hands back a
+-- different collection than the one last refresh saw (a fresh resolved_threads.set_threads()
+-- call always does, since it replaces the collection with a new table) and by attach(), so
+-- a new review session (or a re-fetch of threads) re-notifies rather than staying silent
+-- from a prior session.
 local last_notified_hunks_err
 -- Last (path, count) a not_showable notify fired for -- nil until the first refresh, so
 -- that refresh re-notifies on every count *change* (including the very first nonzero
 -- count) rather than once per PR review (issue #30). Keyed by path like
 -- last_notified_hunks_err above, so navigating to a different file whose count happens
--- to match the previous file's does not wrongly stay silent. Reset by set_threads/attach
--- so a new review session starts fresh.
+-- to match the previous file's does not wrongly stay silent. Reset the same way
+-- last_notified_hunks_err is (see above) and by attach(), so a new review session starts
+-- fresh.
 local last_notified_count
-
--- Store the renderable threads for the active PR (a plain fetch -- no iteration window).
--- Both left- and right-anchored threads are kept for signing; PR-level (no threadContext)
--- human threads are counted, not signed.
-function M.set_threads(threads)
-  signed, pr_level = {}, 0
-  plain_hunks_cache = nil
-  last_notified_hunks_err = nil
-  last_notified_count = nil
-  for _, t in ipairs(threads or {}) do
-    if threads_mod.is_renderable(t) then
-      local path = threads_mod.path(t)
-      if not path then
-        pr_level = pr_level + 1
-      else
-        local range = threads_mod.resolve(t, nil)
-        if range then
-          table.insert(signed, { thread = t, path = threads_mod.norm_repo_path(path), range = range })
-        end
-      end
-    end
-  end
-end
-
--- Human PR-level threads (no threadContext) -- surfaced as a count on open, not an
--- invented inline home.
-function M.pr_level_count()
-  return pr_level
-end
+-- The resolved_threads.all() table identity M.refresh() last saw -- table identity, not
+-- contents, because resolved_threads.set_threads() always allocates a fresh table (see
+-- resolved_threads.lua), so a plain `~=` check is enough to notice "new data landed since
+-- the last refresh" without resolved_threads.lua needing to know signs.lua's trackers exist.
+local last_seen_collection
 
 -- Count of left-side threads with at least one unpairable line in the current
 -- single-window layout (diff1_plain/diff1_raw, a line inside a genuine deletion with no
@@ -236,8 +214,8 @@ end
 -- without a live diffview view. `line_counts` is `{ a = <int|nil>, b = <int> }`: `a` set
 -- only for two-window layouts, `b` always (mirrors diffview_state.current().windows).
 --
--- `signed_items` is `M.set_threads`'s own shape: `{ { thread, path, range }, ... }`, not
--- yet filtered to `entry_path` -- M.plan does that filtering itself, same as M.refresh
+-- `signed_items` is `resolved_threads.all()`'s own shape: `{ { thread, path, range }, ... }`,
+-- not yet filtered to `entry_path` -- M.plan does that filtering itself, same as M.refresh
 -- did before this extraction.
 --
 -- Returns `{ placements, not_showable }`. Each placement is
@@ -277,19 +255,6 @@ function M.plan(layout_kind, hunks, signed_items, entry_path, line_counts)
   return { placements = placements, not_showable = plan_not_showable }
 end
 
--- Signed items (thread + resolved range) for one repo-relative path, normalised.
--- The follower pane (view.lua) uses this to find the threads covering the cursor
--- and to walk between them with ]t / [t.
-function M.items_for(path)
-  local out = {}
-  for _, item in ipairs(signed) do
-    if item.path == path then
-      table.insert(out, item)
-    end
-  end
-  return out
-end
-
 -- Re-render signs in diffview's current diff buffer(s) for the file under the cursor. A
 -- multi-line thread is marked across its whole span, not only at its first line. Threads
 -- on files outside the current diff scope are skipped (M.plan filters by entry_path).
@@ -304,6 +269,19 @@ function M.refresh()
   end
   marked_bufs = {}
   not_showable = 0
+
+  -- A resolved_threads collection this refresh hasn't seen before (a fresh
+  -- resolved_threads.set_threads() call since the last refresh) means a new review
+  -- session/re-fetch landed -- reset the same trackers set_threads() used to reset
+  -- directly back when it lived in this module (see last_notified_hunks_err/
+  -- last_notified_count/last_seen_collection above).
+  local items = resolved_threads.all()
+  if items ~= last_seen_collection then
+    plain_hunks_cache = nil
+    last_notified_hunks_err = nil
+    last_notified_count = nil
+    last_seen_collection = items
+  end
 
   local state = diffview_state.current()
   if not state then
@@ -336,7 +314,7 @@ function M.refresh()
     end
   end
 
-  local result = M.plan(state.layout, hunks, signed, entry_path, line_counts)
+  local result = M.plan(state.layout, hunks, items, entry_path, line_counts)
   not_showable = result.not_showable
   for _, p in ipairs(result.placements) do
     local win = p.target == 'a' and win_a or win_b

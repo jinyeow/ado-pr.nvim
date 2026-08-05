@@ -22,6 +22,7 @@ package.loaded['ado-pr.diffview_state'] = {
 
 local state = require('ado-pr.state')
 local signs = require('ado-pr.signs')
+local resolved_threads = require('ado-pr.resolved_threads')
 
 local failures, count = {}, 0
 local function ok(cond, name, detail)
@@ -296,7 +297,7 @@ do
     windows = { a = { bufnr = buf_a }, b = { bufnr = buf_b } },
     hunks = nil,
   }
-  signs.set_threads({
+  resolved_threads.set_threads({
     make_thread('two.lua', 'left', 3, 3, 'active'),
     make_thread('two.lua', 'right', 10, 10, 'active'),
   })
@@ -317,7 +318,7 @@ do
     windows = { b = { bufnr = buf_b } },
     hunks = { { old_start = 10, old_count = 3, new_start = 10, new_count = 0 } },
   }
-  signs.set_threads({ make_thread('inline.lua', 'left', 11, 11, 'active') })
+  resolved_threads.set_threads({ make_thread('inline.lua', 'left', 11, 11, 'active') })
   signs.refresh()
   eq(marked_rows(buf_b), { 9 }, 'refresh diff1_inline: deletion anchored to hang row')
   eq(signs.not_showable_count(), 0, 'refresh diff1_inline: not_showable 0')
@@ -338,7 +339,7 @@ do
   }
   stub_system()
   system_result = { code = 0, stdout = '@@ -10,3 +10,0 @@\n-a\n-b\n-c\n', stderr = '' }
-  signs.set_threads({ make_thread('plain.lua', 'left', 11, 11, 'active') })
+  resolved_threads.set_threads({ make_thread('plain.lua', 'left', 11, 11, 'active') })
   signs.refresh()
   eq(marked_rows(buf_b), {}, 'refresh diff1_plain: pure-deletion thread not placed')
   eq(signs.not_showable_count(), 1, 'refresh diff1_plain: not_showable incremented')
@@ -367,7 +368,7 @@ do
   }
   stub_system()
   system_result = { code = 0, stdout = '', stderr = '' }
-  signs.set_threads({ make_thread('unchanged.lua', 'left', 5, 5, 'active') })
+  resolved_threads.set_threads({ make_thread('unchanged.lua', 'left', 5, 5, 'active') })
   signs.refresh()
   eq(marked_rows(buf_b), { 5 }, 'refresh diff1_plain empty stdout: identity-mapped to its own row')
   eq(signs.not_showable_count(), 0, 'refresh diff1_plain empty stdout: not_showable 0')
@@ -391,7 +392,7 @@ do
   }
   stub_system()
   system_result = { code = 0, stdout = '@@ -10,1 +10,1 @@\n-old10\n+new10\n@@ -14,1 +14,1 @@\n-old14\n+new14\n', stderr = '' }
-  signs.set_threads({
+  resolved_threads.set_threads({
     make_thread('nearby.lua', 'left', 10, 10, 'active'),
     make_thread('nearby.lua', 'left', 14, 14, 'active'),
   })
@@ -415,7 +416,7 @@ do
   }
   stub_system()
   system_result = { code = 0, stdout = '', stderr = '' }
-  signs.set_threads({ make_thread('cache.lua', 'left', 5, 5, 'active') })
+  resolved_threads.set_threads({ make_thread('cache.lua', 'left', 5, 5, 'active') })
   signs.refresh()
   signs.refresh()
   ok(#system_calls == 1, 'cache hit: git diff invoked only once across two refreshes', #system_calls)
@@ -439,7 +440,7 @@ do
   stub_system()
   stub_notify()
   system_result = { code = 1, stdout = '', stderr = 'boom' }
-  signs.set_threads({ make_thread('fails.lua', 'left', 5, 5, 'active') })
+  resolved_threads.set_threads({ make_thread('fails.lua', 'left', 5, 5, 'active') })
   local call_ok, err = pcall(signs.refresh)
   ok(call_ok, 'git failure: refresh does not crash', err)
   eq(marked_rows(buf_fail), {}, 'git failure: thread not placed')
@@ -472,7 +473,7 @@ do
     windows = { a = { bufnr = buf_a2 }, b = { bufnr = buf_b2 } },
     hunks = nil,
   }
-  signs.set_threads({ make_thread('other.lua', 'right', 7, 7, 'active') })
+  resolved_threads.set_threads({ make_thread('other.lua', 'right', 7, 7, 'active') })
   signs.refresh()
   eq(marked_rows(buf_b2), { 7 }, 'git failure: unrelated later layout still places correctly')
   eq(signs.not_showable_count(), 0, 'git failure: not_showable reset for the unrelated refresh')
@@ -494,7 +495,7 @@ do
   stub_system()
   stub_notify()
   system_result = { code = 7, stdout = '', stderr = '' }
-  signs.set_threads({ make_thread('failsempty.lua', 'left', 5, 5, 'active') })
+  resolved_threads.set_threads({ make_thread('failsempty.lua', 'left', 5, 5, 'active') })
   signs.refresh()
   ok(#notifications == 1, 'git failure empty stderr: notified once', #notifications)
   local n = notifications[1]
@@ -519,12 +520,12 @@ do
   stub_system()
   stub_notify()
   system_result = { code = 1, stdout = '', stderr = 'boom' }
-  signs.set_threads({ make_thread('reset.lua', 'left', 5, 5, 'active') })
+  resolved_threads.set_threads({ make_thread('reset.lua', 'left', 5, 5, 'active') })
   signs.refresh()
   signs.refresh()
   ok(#notifications == 1, 'tracker reset: unchanged failure only notified once before reset', #notifications)
 
-  signs.set_threads({ make_thread('reset.lua', 'left', 5, 5, 'active') })
+  resolved_threads.set_threads({ make_thread('reset.lua', 'left', 5, 5, 'active') })
   signs.refresh()
   ok(#notifications == 2, 'tracker reset: set_threads() resets the tracker, same failure re-notifies', #notifications)
 
@@ -553,7 +554,7 @@ do
   }
   stub_system()
   stub_notify()
-  signs.set_threads({ make_thread('noctx.lua', 'left', 5, 5, 'active') })
+  resolved_threads.set_threads({ make_thread('noctx.lua', 'left', 5, 5, 'active') })
   signs.refresh()
   eq(marked_rows(buf_b), {}, 'no ctx: thread not placed')
   eq(signs.not_showable_count(), 1, 'no ctx: not_showable incremented')
@@ -575,7 +576,7 @@ do
   }
   stub_system()
   stub_notify()
-  signs.set_threads({ make_thread('nobase.lua', 'left', 5, 5, 'active') })
+  resolved_threads.set_threads({ make_thread('nobase.lua', 'left', 5, 5, 'active') })
   signs.refresh()
   eq(marked_rows(buf_b), {}, 'no base: thread not placed')
   eq(signs.not_showable_count(), 1, 'no base: not_showable incremented')
@@ -600,7 +601,7 @@ do
   }
   stub_system()
   stub_notify()
-  signs.set_threads({ make_thread('norepo.lua', 'left', 5, 5, 'active') })
+  resolved_threads.set_threads({ make_thread('norepo.lua', 'left', 5, 5, 'active') })
   signs.refresh()
   eq(marked_rows(buf_b), {}, 'no repo_root: thread not placed')
   eq(signs.not_showable_count(), 1, 'no repo_root: not_showable incremented')
@@ -621,7 +622,7 @@ do
     windows = { a = { bufnr = buf_a }, b = { bufnr = buf_b } },
     hunks = nil,
   }
-  signs.set_threads({ make_thread('switch.lua', 'left', 3, 3, 'active') })
+  resolved_threads.set_threads({ make_thread('switch.lua', 'left', 3, 3, 'active') })
   signs.refresh()
   ok(#marked_rows(buf_a) == 1, 'cleanup: initial mark present in buf a')
 
@@ -655,7 +656,7 @@ do
   stub_system()
   system_result = { code = 0, stdout = '@@ -10,3 +10,0 @@\n-a\n-b\n-c\n', stderr = '' }
   stub_notify()
-  signs.set_threads({
+  resolved_threads.set_threads({
     make_thread('notify.lua', 'left', 10, 11, 'active'),
     make_thread('notify.lua', 'left', 12, 12, 'active'),
   })
@@ -675,7 +676,7 @@ do
   ok(#notifications == 1, 'notify: unchanged count on later refresh does not repeat', #notifications)
 
   -- Navigating to a different unshowable count re-notifies.
-  signs.set_threads({ make_thread('notify.lua', 'left', 10, 11, 'active') })
+  resolved_threads.set_threads({ make_thread('notify.lua', 'left', 10, 11, 'active') })
   signs.refresh()
   ok(#notifications == 2, 'notify: changed count notifies again', #notifications)
   ok(
@@ -686,7 +687,7 @@ do
 
   -- Dropping to zero updates the tracker but stays silent (default: no "all showable"
   -- notification per the ticket).
-  signs.set_threads({})
+  resolved_threads.set_threads({})
   signs.refresh()
   eq(signs.not_showable_count(), 0, 'notify: count drops to 0')
   ok(#notifications == 2, 'notify: drop to 0 stays silent', #notifications)
@@ -711,11 +712,11 @@ do
   system_result = { code = 0, stdout = '@@ -10,3 +10,0 @@\n-a\n-b\n-c\n', stderr = '' }
   stub_notify()
   local threads = { make_thread('reset.lua', 'left', 10, 11, 'active') }
-  signs.set_threads(threads)
+  resolved_threads.set_threads(threads)
   signs.refresh()
   ok(#notifications == 1, 'reset: initial refresh notifies')
 
-  signs.set_threads(threads)
+  resolved_threads.set_threads(threads)
   signs.refresh()
   ok(#notifications == 2, 'reset: set_threads resets tracker, same count re-notifies', #notifications)
 
@@ -739,7 +740,7 @@ do
   stub_system()
   system_result = { code = 0, stdout = '@@ -10,3 +10,0 @@\n-a\n-b\n-c\n', stderr = '' }
   stub_notify()
-  signs.set_threads({
+  resolved_threads.set_threads({
     make_thread('cross-a.lua', 'left', 10, 10, 'active'),
     make_thread('cross-b.lua', 'left', 10, 10, 'active'),
   })
@@ -773,7 +774,7 @@ do
   stub_system()
   system_result = { code = 0, stdout = '@@ -10,3 +10,0 @@\n-a\n-b\n-c\n', stderr = '' }
   stub_notify()
-  signs.set_threads({ make_thread('attach.lua', 'left', 10, 11, 'active') })
+  resolved_threads.set_threads({ make_thread('attach.lua', 'left', 10, 11, 'active') })
   signs.refresh()
   ok(#notifications == 1, 'attach: initial refresh notifies')
 
