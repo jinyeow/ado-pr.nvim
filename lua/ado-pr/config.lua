@@ -7,6 +7,8 @@ local defaults = {
   project = nil, -- e.g. 'TSC Cloud Platform Engineering'
   repository = nil, -- e.g. 'T2.ServiceCatalogue'
   api_version = '7.1', -- ADO REST api-version for `az devops invoke`
+  pane_height = 14, -- thread follower pane split height, in lines (view.lua)
+  wrap_width = 76, -- thread follower pane comment wrap width, in characters (view.lua)
   keymaps = {
     -- Buffer-local to diffview's diff windows only (signs.lua / view.lua wire
     -- these), single-key by default -- prototypes/NOTES.md found two-key

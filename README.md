@@ -58,10 +58,11 @@ lua/ado-pr/
   az.lua       az CLI + `az devops invoke` glue (reads, checkout, vote, post thread)
   anchor.lua   diffview cursor → (filePath, line, side) ADO thread anchor (pure + adapter)
   threads.lua  filter + read-resolve ADO PR comment threads (pure: no Neovim API, no network)
-  signs.lua    thread markers in diffview's right-side buffer (adapter over threads.lua + diffview_state)
+  signs.lua    thread markers in diffview's diff buffers, both sides (adapter over threads.lua + hunks.lua + diffview_state)
+  hunks.lua    map an old-side line through a hunk table to its new-buffer row (pure: no Neovim API, no diffview, no git)
   view.lua     thread follower pane: split below the diff, tracks the cursor, ]t/[t (adapter)
   diffview_state.lua  active diffview view: entry, layout kind, per-side win/buf, inline hunks
-  state.lua    active-PR context (id/repoId/project) for the review session
+  state.lua    active-PR context (id/repoId/project/base) for the review session
   review.lua   checkout → fetch PR target ref → DiffviewOpen target...HEAD; post/sign comment threads
   picker.lua   fzf-lua active-PR picker
 plugin/ado-pr.lua  user commands
@@ -73,14 +74,16 @@ tests/         headless assert specs (`nvim --headless -l tests/<name>_spec.lua`
 1. **[done] Read/checkout/diff/vote** via `az`.
 2. **[done] Inline comment threads** — `az devops invoke --resource pullRequestThreads` POST; the
    diffview cursor maps to `(filePath, line, side)` in `anchor.lua`. Needs a live-PR smoke test.
-3. **[done] Show existing threads as signs in the diff buffers** — right-side (new-file) threads
-   only; `●` active / `○` resolved, re-applied on diffview's buffer-enter event. Needs a live-PR
-   smoke test.
+3. **[done] Show existing threads as signs in the diff buffers**, both sides — `●` active / `○`
+   resolved, re-applied on diffview's buffer-enter event. Two-window layouts sign the old-side
+   window directly; the single-window layouts (`diff1_inline`/`diff1_plain`/`diff1_raw`) map an
+   old-side line through a hunk table (`hunks.lua`) to its real row, or count it as not showable
+   when the layout has none. Needs a live-PR smoke test.
 4. **[done] Thread follower pane** — a split below the diff shows the thread under the cursor;
    `<F8>` toggles it, `]t`/`[t` jump between threads, all buffer-local to the diff and
    user-configurable via `keymaps`. Overlapping threads show the narrowest covering one with a
    visible count; cycling/picking between them is the next step. Needs a live-PR smoke test.
-5. Left-side thread anchors, iteration browsing, live refresh, reviewers, status checks.
+5. Iteration browsing, live refresh, reviewers, status checks.
 
 The hard part is step 2/3: anchoring threads onto diffview buffers. Side is taken from the **focused
 diff pane** (right = new, left = old), and the path from diffview's `cur_entry` — the *displayed* diff

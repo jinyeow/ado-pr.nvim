@@ -13,25 +13,26 @@ local signs = require('ado-pr.signs')
 local diffview_state = require('ado-pr.diffview_state')
 local config = require('ado-pr.config')
 
--- Matches prototypes/threads_ui_prototype.lua's variant B height, the number the
--- prototype's verdict weighed against ("Variant B costs you 14 lines of height
--- permanently").
-local HEIGHT = 14
+-- Default matches prototypes/threads_ui_prototype.lua's variant B height, the
+-- number the prototype's verdict weighed against ("Variant B costs you 14
+-- lines of height permanently"). Configurable via config.pane_height.
+local DEFAULT_HEIGHT = 14
 
 M.EMPTY_LINES = { '(no thread on this line)' }
 
-local WRAP_WIDTH = 76
+local DEFAULT_WRAP_WIDTH = 76
 
 -- Character-aware wrap (vim.fn.strcharpart / strchars, not #/sub): comment text
 -- routinely carries multi-byte characters (em dashes, smart quotes -- see
 -- fixtures_threads.lua), and a byte-offset cut can land mid-character.
 local function wrap(text)
+  local wrap_width = config.get().wrap_width or DEFAULT_WRAP_WIDTH
   local out = {}
   for _, line in ipairs(vim.split(text, '\n')) do
-    while vim.fn.strchars(line) > WRAP_WIDTH do
-      local head = vim.fn.strcharpart(line, 0, WRAP_WIDTH)
+    while vim.fn.strchars(line) > wrap_width do
+      local head = vim.fn.strcharpart(line, 0, wrap_width)
       local cut = head:match('.*%s')
-      local cut_chars = cut and vim.fn.strchars(cut) or WRAP_WIDTH
+      local cut_chars = cut and vim.fn.strchars(cut) or wrap_width
       table.insert(out, cut or head)
       line = vim.fn.strcharpart(line, cut_chars):gsub('^%s+', '')
     end
@@ -137,7 +138,7 @@ function M.open(tab)
   end
   local views = snapshot_views()
   local prev = vim.api.nvim_get_current_win()
-  vim.cmd(('botright %dsplit'):format(HEIGHT))
+  vim.cmd(('botright %dsplit'):format(config.get().pane_height or DEFAULT_HEIGHT))
   local s = sessions[tab] or {}
   sessions[tab] = s
   s.win = vim.api.nvim_get_current_win()
