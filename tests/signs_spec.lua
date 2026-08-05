@@ -723,6 +723,41 @@ do
   restore_notify()
 end
 
+-- Navigating to a different file whose not_showable count happens to match the
+-- previous file's count still re-notifies -- the dedup key must include the path, not
+-- just the count, or two files with equal counts wrongly stay silent on navigation.
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef', repo_root = '/review-root' })
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'cross-a.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  system_result = { code = 0, stdout = '@@ -10,3 +10,0 @@\n-a\n-b\n-c\n', stderr = '' }
+  stub_notify()
+  signs.set_threads({
+    make_thread('cross-a.lua', 'left', 10, 10, 'active'),
+    make_thread('cross-b.lua', 'left', 10, 10, 'active'),
+  })
+  signs.refresh()
+  eq(signs.not_showable_count(), 1, 'cross-file: file A not_showable count 1')
+  ok(#notifications == 1, 'cross-file: first refresh notifies')
+
+  -- Same threads retained (no set_threads() call) -- only the file under the cursor
+  -- changes, to a different path with the same not_showable count as file A.
+  current_snapshot.entry.path = 'cross-b.lua'
+  signs.refresh()
+  eq(signs.not_showable_count(), 1, 'cross-file: file B not_showable count 1 (same as A)')
+  ok(#notifications == 2, 'cross-file: different file with same count notifies again', #notifications)
+
+  restore_system()
+  restore_notify()
+end
+
 -- attach() also resets the tracker (a fresh :AdoPrReview session should re-notify even
 -- if the previous session already notified about the same count).
 do
