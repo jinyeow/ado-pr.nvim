@@ -408,6 +408,48 @@ do
   eq(vim.api.nvim_win_get_cursor(win), { 1, 0 }, 'jump: zero-line buffer is a no-op')
 end
 
+-- ---------------------------------------------------------------------------
+-- Issue #42: repeated ]t/[t past a clamped thread must not get stuck
+-- reselecting the same clamped row forever -- once landed on a stale
+-- thread's clamped last-line, the next press must wrap to the next real
+-- thread instead of re-matching the stale thread's unclamped line_start
+-- against the cursor's already-clamped row.
+-- ---------------------------------------------------------------------------
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
+  set_view('jump.lua', win, buf)
+  signs.set_threads({ right_thread(1, 2, 2), right_thread(2, 50, 52) })
+
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+  view.jump(1)
+  eq(vim.api.nvim_win_get_cursor(win), { 2, 0 }, 'issue 42: first ]t lands on in-range thread')
+
+  view.jump(1)
+  eq(vim.api.nvim_win_get_cursor(win), { 5, 0 }, 'issue 42: second ]t clamps to the stale thread at buffer end')
+
+  -- Before the fix: this press re-matched the same stale thread (its unclamped
+  -- line_start 50 still beats the clamped cursor row 5) and left the cursor
+  -- stuck at row 5 forever.
+  view.jump(1)
+  eq(vim.api.nvim_win_get_cursor(win), { 2, 0 }, 'issue 42: third ]t wraps to the first thread instead of re-selecting the same clamped row')
+
+  view.jump(1)
+  eq(vim.api.nvim_win_get_cursor(win), { 5, 0 }, 'issue 42: fourth ]t reaches the stale thread again, the cycle keeps progressing')
+
+  -- Same failure mode in the other direction, from the buffer's first line.
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+  view.jump(-1)
+  eq(vim.api.nvim_win_get_cursor(win), { 5, 0 }, 'issue 42: first [t wraps to the stale thread at buffer end')
+
+  view.jump(-1)
+  eq(vim.api.nvim_win_get_cursor(win), { 2, 0 }, 'issue 42: second [t lands on the in-range thread')
+
+  view.jump(-1)
+  eq(vim.api.nvim_win_get_cursor(win), { 5, 0 }, 'issue 42: third [t wraps to the stale thread again instead of getting stuck')
+end
+
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
   for _, f in ipairs(failures) do

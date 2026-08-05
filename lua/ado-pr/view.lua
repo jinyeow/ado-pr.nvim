@@ -189,11 +189,16 @@ function M.jump(delta)
   if #ordered == 0 then
     return
   end
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
   local line = vim.api.nvim_win_get_cursor(win)[1]
   local target
+  -- Compare each candidate's *clamped* landing row against the cursor, not its raw
+  -- (possibly stale) line_start: a stale thread's line_start can keep outrunning the
+  -- cursor's already-clamped row forever (issue #42), so a candidate that would just
+  -- re-land on the row we're already on is skipped rather than re-selected.
   if delta > 0 then
     for _, item in ipairs(ordered) do
-      if item.range.line_start > line then
+      if item.range.line_start > line and threads_mod.clamp(item.range, line_count).line_start ~= line then
         target = item
         break
       end
@@ -201,7 +206,7 @@ function M.jump(delta)
     target = target or ordered[1]
   else
     for i = #ordered, 1, -1 do
-      if ordered[i].range.line_start < line then
+      if ordered[i].range.line_start < line and threads_mod.clamp(ordered[i].range, line_count).line_start ~= line then
         target = ordered[i]
         break
       end
@@ -212,7 +217,7 @@ function M.jump(delta)
   -- was written against (stale iteration range), so clamp before touching the cursor
   -- rather than letting nvim_win_set_cursor error on an out-of-bounds row. A
   -- zero-line buffer clamps to the empty-buffer sentinel (line 0) -- skip the jump.
-  local clamped = threads_mod.clamp(target.range, vim.api.nvim_buf_line_count(bufnr))
+  local clamped = threads_mod.clamp(target.range, line_count)
   if clamped.line_start == 0 then
     return
   end
