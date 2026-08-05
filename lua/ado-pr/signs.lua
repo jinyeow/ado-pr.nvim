@@ -82,10 +82,13 @@ function M.pr_level_count()
   return pr_level
 end
 
--- Left-side threads whose position has no real row in the current single-window layout
--- (diff1_plain/diff1_raw, a line inside a genuine deletion) -- surfaced as a count, never
--- a guessed position. Reset on every M.refresh() call, so it reflects the file/layout
--- under the cursor now.
+-- Count of left-side threads with at least one unpairable line in the current
+-- single-window layout (diff1_plain/diff1_raw, a line inside a genuine deletion with no
+-- new-side counterpart) -- surfaced as a count, never a guessed position. A thread can
+-- both contribute here and still get a placement: a range spanning a shrink hunk pairs
+-- its in-range lines and counts the excess unpairable ones, so it's neither fully placed
+-- nor fully hidden. Reset on every M.refresh() call, so it reflects the file/layout under
+-- the cursor now.
 function M.not_showable_count()
   return not_showable
 end
