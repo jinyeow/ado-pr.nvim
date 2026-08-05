@@ -87,7 +87,8 @@ function M.open(id)
     vim.notify('ado-pr: ' .. berr, vim.log.levels.ERROR)
     return
   end
-  if pcall(require, 'diffview') then
+  local has_diffview = pcall(require, 'diffview')
+  if has_diffview then
     vim.cmd('DiffviewOpen ' .. base .. '...HEAD')
   else
     vim.cmd('Git difftool ' .. base .. '...HEAD') -- vim-fugitive fallback
@@ -104,7 +105,14 @@ function M.open(id)
   signs.set_threads(list)
   signs.attach()
   signs.refresh()
-  view.attach()
+  -- The follower pane depends on Diffview window/scene APIs (and its teardown
+  -- relies on DiffviewViewClosed, which never fires without Diffview), so it
+  -- only attaches on the Diffview-success branch above.
+  if has_diffview then
+    view.attach()
+  else
+    vim.notify('ado-pr: thread follower pane needs diffview.nvim', vim.log.levels.INFO)
+  end
   local pr_level = signs.pr_level_count()
   if pr_level > 0 then
     vim.notify(('ado-pr: %d PR-level thread%s'):format(pr_level, pr_level == 1 and '' or 's'), vim.log.levels.INFO)
