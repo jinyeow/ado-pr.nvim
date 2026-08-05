@@ -450,6 +450,61 @@ do
   eq(vim.api.nvim_win_get_cursor(win), { 5, 0 }, 'issue 42: third [t wraps to the stale thread again instead of getting stuck')
 end
 
+-- Issue #42, reverse direction: the [t regression assertions above pass
+-- identically with or without the fix (verified against main) -- with only
+-- one stale thread, the reverse loop's pre-existing `target or
+-- ordered[#ordered]` wrap-fallback happens to land on the same row either
+-- way. A stale *negative* anchor exercises the fix for real: pre-fix, [t
+-- from row 1 re-selects the same negative-anchored thread forever (stuck at
+-- row 1); post-fix it falls through to the wrap-fallback and reaches the
+-- in-range thread instead.
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
+  set_view('jump.lua', win, buf)
+  signs.set_threads({ right_thread(1, 4, 4), right_thread(2, -3, -1) })
+
+  vim.api.nvim_win_set_cursor(win, { 5, 0 })
+  view.jump(-1)
+  eq(vim.api.nvim_win_get_cursor(win), { 4, 0 }, 'issue 42 negative anchor: first [t lands on the in-range thread')
+
+  view.jump(-1)
+  eq(vim.api.nvim_win_get_cursor(win), { 1, 0 }, 'issue 42 negative anchor: second [t clamps the negative anchor to line 1')
+
+  -- Before the fix: this press re-matched the same negative-anchored thread
+  -- (its unclamped line_start -3 still beats the clamped cursor row 1) and
+  -- left the cursor stuck at row 1 forever.
+  view.jump(-1)
+  eq(vim.api.nvim_win_get_cursor(win), { 4, 0 }, 'issue 42 negative anchor: third [t wraps to the in-range thread instead of re-selecting the same clamped row')
+end
+
+-- Issue #42, multiple stale threads clamping to the same row: two threads
+-- anchored past the buffer end (line_start 50 and 60 in a 5-line buffer)
+-- both clamp to row 5. Repeated ]t must skip both rather than getting stuck
+-- re-selecting either one once the cursor is already on their shared
+-- clamped row.
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
+  set_view('jump.lua', win, buf)
+  signs.set_threads({ right_thread(1, 2, 2), right_thread(2, 50, 52), right_thread(3, 60, 62) })
+
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+  view.jump(1)
+  eq(vim.api.nvim_win_get_cursor(win), { 2, 0 }, 'issue 42 multi-stale: first ]t lands on the in-range thread')
+
+  view.jump(1)
+  eq(vim.api.nvim_win_get_cursor(win), { 5, 0 }, 'issue 42 multi-stale: second ]t clamps to the shared stale row')
+
+  -- Before the fix: both stale threads' unclamped line_start (50 and 60)
+  -- still beat the clamped cursor row 5, so this press re-matched one of
+  -- them and left the cursor stuck at row 5 forever.
+  view.jump(1)
+  eq(vim.api.nvim_win_get_cursor(win), { 2, 0 }, 'issue 42 multi-stale: third ]t wraps past both stale threads to the in-range thread')
+end
+
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
   for _, f in ipairs(failures) do
