@@ -478,6 +478,31 @@ do
   restore_notify()
 end
 
+-- ctx.base set but ctx.repo_root missing: plain_hunks_for must not fall back to
+-- vim.system's default cwd (the process cwd) -- the exact failure mode this module exists
+-- to eliminate -- so it bails out the same way a missing ctx.base does.
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'deadbeef' }) -- no repo_root
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'norepo.lua' },
+    layout = 'diff1_raw',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  stub_notify()
+  signs.set_threads({ make_thread('norepo.lua', 'left', 5, 5, 'active') })
+  signs.refresh()
+  eq(marked_rows(buf_b), {}, 'no repo_root: thread not placed')
+  eq(signs.not_showable_count(), 1, 'no repo_root: not_showable incremented')
+  eq(#system_calls, 0, 'no repo_root: git never invoked')
+  eq(#notifications, 0, 'no repo_root: no notification')
+  restore_system()
+  restore_notify()
+end
+
 -- Cleanup: refresh after a layout switch clears extmarks from buffers the previous layout
 -- marked, even when the new layout no longer signs into that buffer at all.
 do

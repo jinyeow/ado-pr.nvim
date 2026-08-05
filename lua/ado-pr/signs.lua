@@ -135,16 +135,17 @@ end
 -- open (never `vim.fn.getcwd()`, which can differ by refresh time).
 --
 -- Returns hunks, err. Only a `code == 0` result -- including a legitimately empty parse
--- for an unchanged file -- is cached and returned as a table; no ctx, no `ctx.base`, or a
--- non-zero exit all return `nil` and write nothing to the cache, so the failure is neither
--- mistaken for "no changes" (identity mapping) nor remembered past this refresh -- the
--- next refresh naturally retries.
+-- for an unchanged file -- is cached and returned as a table; no ctx, no `ctx.base`, no
+-- `ctx.repo_root` (guarded here rather than letting `vim.system` silently fall back to the
+-- process cwd), or a non-zero exit all return `nil` and write nothing to the cache, so the
+-- failure is neither mistaken for "no changes" (identity mapping) nor remembered past this
+-- refresh -- the next refresh naturally retries.
 local function plain_hunks_for(entry_path)
   if plain_hunks_cache and plain_hunks_cache.path == entry_path then
     return plain_hunks_cache.hunks
   end
   local ctx = state_mod.get()
-  if not (ctx and ctx.base) then
+  if not (ctx and ctx.base and ctx.repo_root) then
     return nil
   end
   local res = vim.system({ 'git', 'diff', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = ctx.repo_root }):wait()
