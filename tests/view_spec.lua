@@ -505,6 +505,157 @@ do
   eq(vim.api.nvim_win_get_cursor(win), { 2, 0 }, 'issue 42 multi-stale: third ]t wraps past both stale threads to the in-range thread')
 end
 
+-- ---------------------------------------------------------------------------
+-- picker_entry -- pure: one covering thread's picker display line (span +
+-- first comment). Character-aware only insofar as it does no truncation of
+-- its own (fzf handles long lines); it must not corrupt multi-byte text.
+-- ---------------------------------------------------------------------------
+do
+  local item = {
+    thread = { id = 96937, comments = { comment('Priya Raman', '2026-07-23', 'nit: rename this') } },
+    range = { line_start = 77, line_end = 77 },
+  }
+  ok(view.picker_entry(item) == '#96937  line 77  nit: rename this', 'picker_entry: single-line span', view.picker_entry(item))
+end
+
+do
+  local item = {
+    thread = { id = 97122, comments = { comment('Priya Raman', '2026-07-23', 'first line\nsecond line') } },
+    range = { line_start = 62, line_end = 84 },
+  }
+  ok(
+    view.picker_entry(item) == '#97122  lines 62-84  first line second line',
+    'picker_entry: multi-line span, newline in comment collapsed to a space',
+    view.picker_entry(item)
+  )
+end
+
+-- ---------------------------------------------------------------------------
+-- M.show / M.pick -- cycling and picking between threads covering the same
+-- line (issue #8). Same stub/set_threads technique as M.jump's tests above.
+-- ---------------------------------------------------------------------------
+
+-- Locates the follower pane's buffer in the given tab (nofile + wipe, the
+-- only buffer view.lua's session creates that way) and returns its first
+-- line -- the observable the header assertions below check.
+local function pane_first_line(tab)
+  tab = tab or vim.api.nvim_get_current_tabpage()
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+    local b = vim.api.nvim_win_get_buf(w)
+    if vim.bo[b].buftype == 'nofile' and vim.bo[b].bufhidden == 'wipe' then
+      return vim.api.nvim_buf_get_lines(b, 0, 1, false)[1]
+    end
+  end
+end
+
+-- Cycling advances through every covering thread and wraps; the count shown
+-- stays correct throughout, and the index survives a refresh() on the same
+-- line (e.g. the WinEnter fired by a picker window closing).
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
+  set_view('jump.lua', win, buf)
+  resolved_threads.set_threads({ right_thread(1, 2, 2), right_thread(2, 1, 5) })
+
+  local tab = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_win_set_cursor(win, { 2, 0 })
+  view.open(tab)
+  ok(pane_first_line(tab) == 'Thread #1  [active]   (1 of 2 here)', 'show: pane opens on the narrowest covering thread', pane_first_line(tab))
+
+  view.show(tab) -- pane already open, same line -> cycle
+  ok(pane_first_line(tab) == 'Thread #2  [active]   (2 of 2 here)', 'show: second press advances to the next covering thread', pane_first_line(tab))
+
+  view.refresh(tab) -- e.g. the WinEnter a picker window's close fires
+  ok(pane_first_line(tab) == 'Thread #2  [active]   (2 of 2 here)', 'refresh: cycled index survives a same-line refresh', pane_first_line(tab))
+
+  view.show(tab) -- wraps back around
+  ok(pane_first_line(tab) == 'Thread #1  [active]   (1 of 2 here)', 'show: wraps back to the first covering thread', pane_first_line(tab))
+
+  -- Moving to a different line resets the cycle to that line's narrowest
+  -- covering thread (here, the only one covering line 5).
+  vim.api.nvim_win_set_cursor(win, { 5, 0 })
+  view.refresh(tab)
+  ok(pane_first_line(tab) == 'Thread #2  [active]', 'refresh: moving to a different line resets to its narrowest thread', pane_first_line(tab))
+
+  view.close(tab)
+end
+
+-- A file switch that happens to land on the same line number must also
+-- reset the cycle -- the cycle is keyed on (path, line), not line alone.
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
+  set_view('jump.lua', win, buf)
+  resolved_threads.set_threads({ right_thread(1, 2, 2), right_thread(2, 1, 5) })
+
+  local tab = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_win_set_cursor(win, { 2, 0 })
+  view.open(tab)
+  view.show(tab) -- cycle to (2 of 2)
+  ok(pane_first_line(tab) == 'Thread #2  [active]   (2 of 2 here)', 'cross-file: cycled to the second thread before switching files', pane_first_line(tab))
+
+  -- Switch to a different file, cursor still on line 2, only one thread there.
+  local other_thread = {
+    id = 3,
+    status = 'active',
+    threadContext = { filePath = '/other.lua', rightFileStart = { line = 2 }, rightFileEnd = { line = 2 } },
+    comments = { { commentType = 'text', author = { displayName = 'A' }, publishedDate = '2026-01-01', content = 'x' } },
+  }
+  set_view('other.lua', win, buf)
+  resolved_threads.set_threads({ other_thread })
+  view.refresh(tab)
+  ok(pane_first_line(tab) == 'Thread #3  [active]', 'cross-file: switching files resets the cycle even on the same line number', pane_first_line(tab))
+
+  view.close(tab)
+end
+
+-- On a line with exactly one covering thread, both affordances behave
+-- sensibly: cycling is a no-op (stays on the same thread, no error), and
+-- picking notifies rather than erroring when fzf-lua isn't installed (same
+-- convention as picker.lua).
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
+  set_view('jump.lua', win, buf)
+  resolved_threads.set_threads({ right_thread(1, 2, 2) })
+
+  local tab = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_win_set_cursor(win, { 2, 0 })
+  view.open(tab)
+  ok(pane_first_line(tab) == 'Thread #1  [active]', 'single thread: pane shows it with no position suffix', pane_first_line(tab))
+
+  local show_ok = pcall(view.show, tab)
+  ok(show_ok, 'single thread: show does not error')
+  ok(pane_first_line(tab) == 'Thread #1  [active]', 'single thread: show stays on the same thread', pane_first_line(tab))
+
+  local pick_ok = pcall(view.pick, tab)
+  ok(pick_ok, 'single thread: pick does not error when fzf-lua is unavailable')
+
+  view.close(tab)
+end
+
+-- The show key opens the pane when it is closed (first press = show),
+-- matching the toggle key's behaviour rather than erroring or no-op'ing.
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3' })
+  set_view('jump.lua', win, buf)
+  resolved_threads.set_threads({ right_thread(1, 2, 2) })
+
+  local tab = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_win_set_cursor(win, { 2, 0 })
+  ok(not view.is_open(tab), 'show on closed pane: starts closed')
+  view.show(tab)
+  ok(view.is_open(tab), 'show on closed pane: first press opens it')
+  ok(pane_first_line(tab) == 'Thread #1  [active]', 'show on closed pane: shows the narrowest covering thread', pane_first_line(tab))
+
+  view.close(tab)
+end
+
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
   for _, f in ipairs(failures) do
