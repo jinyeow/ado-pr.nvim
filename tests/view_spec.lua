@@ -743,11 +743,12 @@ do
   view.close(tab)
 end
 
--- Issue #8: closing the pane must clear the cycle/shown state, not just the
--- window. Cursor movement while the pane is closed never runs through
--- refresh() (it early-returns on a closed pane), so close() is the only
--- place left to reset that state -- otherwise a stale cycled index survives
--- a full close -> move away -> move back -> reopen round trip.
+-- Issue #8: a closed pane must not carry its cycle/shown state into the next
+-- reopen. Cursor movement while the pane is closed never runs through
+-- refresh() (it early-returns on a closed pane), so open()'s reuse of the
+-- prior session is the one place left to reset that state -- otherwise a
+-- stale cycled index survives a full close -> move away -> move back ->
+-- reopen round trip.
 do
   local win = vim.api.nvim_get_current_win()
   local buf = vim.api.nvim_get_current_buf()
