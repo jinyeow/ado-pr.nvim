@@ -41,6 +41,13 @@ package.loaded['ado-pr.view'] = {
   end,
 }
 
+local fzf_exec_calls
+package.loaded['fzf-lua'] = {
+  fzf_exec = function(lines, opts)
+    table.insert(fzf_exec_calls, { lines = lines, opts = opts })
+  end,
+}
+
 local review = require('ado-pr.review')
 local state = require('ado-pr.state')
 
@@ -106,7 +113,7 @@ end
 
 local calls
 local checkout_result, show_result, fetch_result, revparse_result, threads_result
-local cat_file_result, git_fetch_sha_result
+local cat_file_result, git_fetch_sha_result, iterations_result
 
 local real_system = vim.system
 local function stub_system()
@@ -158,6 +165,12 @@ local function stub_system()
           return threads_result
         end,
       }
+    elseif vim.tbl_contains(cmd, 'pullRequestIterations') then
+      return {
+        wait = function()
+          return iterations_result
+        end,
+      }
     end
     error('unexpected vim.system call: ' .. vim.inspect(cmd))
   end
@@ -184,6 +197,7 @@ local function reset(opts)
   signs_calls = {}
   view_calls = {}
   set_threads_calls = {}
+  fzf_exec_calls = {}
   stub_system()
   stub_cmd()
   stub_notify()
@@ -199,6 +213,7 @@ local function reset(opts)
   fetch_result = { code = 0, stdout = '', stderr = '', target_ref = 'refs/heads/main' }
   revparse_result = { code = 0, stdout = 'deadbeef\n', stderr = '' }
   threads_result = { code = 0, stdout = vim.json.encode({ count = 0, value = {} }), stderr = '' }
+  iterations_result = { code = 0, stdout = vim.json.encode({ count = #iterations, value = iterations }), stderr = '' }
   cat_file_result = (opts and opts.cat_file_result) or { code = 0, stdout = '', stderr = '' }
   git_fetch_sha_result = (opts and opts.git_fetch_sha_result) or { code = 0, stdout = '', stderr = '' }
 end
@@ -224,8 +239,8 @@ end
 
 -- Bring a PR under review first, the same way review_base_spec.lua's happy path does --
 -- select_iteration/reset_window depend on state.get() already having repo_root/pr_base.
-local function open_pr()
-  review.open(21121)
+local function open_pr(id)
+  review.open(id or 21121)
 end
 
 -- Selecting an iteration: closes the existing diff, opens the new commit range, captures
@@ -425,6 +440,36 @@ do
   review.comment('should not post')
 
   ok(has_level(vim.log.levels.ERROR), 'comment: refused while an iteration window is active')
+end
+
+-- browse_iterations' picker callback captures the active PR id when the picker opens. If a
+-- different PR becomes active before a selection is made (the picker stayed open while the
+-- user switched PRs), the stale selection must not be applied against the new PR's state --
+-- bailed silently, the same convention signs.lua's attach-generation guard uses for "an
+-- older async callback is no longer current".
+do
+  reset()
+  open_pr() -- PR 21121
+
+  review.browse_iterations()
+  ok(#fzf_exec_calls == 1, 'browse_iterations: opens the fzf picker')
+  local default_action = fzf_exec_calls[1].opts.actions['default']
+  local iter3_line
+  for _, line in ipairs(fzf_exec_calls[1].lines) do
+    if line:match('^#3') then
+      iter3_line = line
+    end
+  end
+  ok(iter3_line ~= nil, 'browse_iterations: picker lists iteration 3')
+
+  open_pr(30303) -- switches the active PR context away from the one the picker opened for
+  calls, signs_calls, view_calls, set_threads_calls = {}, {}, {}, {}
+
+  default_action({ iter3_line })
+  vim.wait(10)
+
+  ok(#cmd_calls() == 0, 'browse_iterations: stale selection never opens a diff')
+  ok(#set_threads_calls == 0, 'browse_iterations: stale selection never fetches/wires threads')
 end
 
 vim.system = real_system

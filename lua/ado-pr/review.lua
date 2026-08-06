@@ -273,6 +273,11 @@ function M.browse_iterations()
     id_of[line] = it.id
     table.insert(lines, line)
   end
+  -- Captured now, not read again from state.get() inside the callback below -- if the user
+  -- opens a different PR while this picker is still open, the callback must detect that its
+  -- captured iterations/ctx are for a PR that's no longer active, rather than applying a
+  -- stale selection against the new PR's state.
+  local opened_for_id = ctx.id
   fzf.fzf_exec(lines, {
     prompt = 'PR Iterations> ',
     actions = {
@@ -284,6 +289,10 @@ function M.browse_iterations()
         -- Deferred a tick: fzf-lua's picker float is still tearing down when this fires,
         -- and DiffviewClose/DiffviewOpen shouldn't run against that half-closed window.
         vim.schedule(function()
+          local now = state.get()
+          if not (now and now.id == opened_for_id) then
+            return
+          end
           if choice == FULL_VIEW_LABEL then
             M.reset_window()
           else
