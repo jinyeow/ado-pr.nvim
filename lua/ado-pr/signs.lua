@@ -119,30 +119,33 @@ local function clamped_dedup_lines(lines, line_count)
 end
 
 -- Self-computed hunk table for diff1_plain/diff1_raw, which attach no diffview diff
--- renderer to read one from. `git diff <base>...HEAD -- <path>` is the exact range
--- review.lua already opened diffview against, run against the review root captured at
--- open (never `vim.fn.getcwd()`, which can differ by refresh time). `-U0` keeps every
--- hunk a single contiguous change run with no surrounding context lines folded in --
--- without it, git's default ~3 lines of context on each side can merge separate nearby
--- changes into one hunk whose old_count/new_count then span unrelated context, which
--- breaks paired_row's offset math below (it assumes old_count/new_count only cover
--- genuinely changed lines).
+-- renderer to read one from. `git diff state_mod.range() -- <path>` (`<base>...<head>`,
+-- `head` defaulting to `HEAD`) is the exact range review.lua already opened diffview
+-- against -- the SAME range whether that's the full PR (`base...HEAD`) or an iteration
+-- window (`base...HEAD` overwritten to that iteration's own commit pair by
+-- review.select_iteration) -- run against the review root captured at open (never
+-- `vim.fn.getcwd()`, which can differ by refresh time). `-U0` keeps every hunk a single
+-- contiguous change run with no surrounding context lines folded in -- without it, git's
+-- default ~3 lines of context on each side can merge separate nearby changes into one hunk
+-- whose old_count/new_count then span unrelated context, which breaks paired_row's offset
+-- math below (it assumes old_count/new_count only cover genuinely changed lines).
 --
 -- Returns hunks, err. Only a `code == 0` result -- including a legitimately empty parse
--- for an unchanged file -- is cached and returned as a table; no ctx, no `ctx.base`, no
--- `ctx.repo_root` (guarded here rather than letting `vim.system` silently fall back to the
--- process cwd), or a non-zero exit all return `nil` and write nothing to the cache, so the
--- failure is neither mistaken for "no changes" (identity mapping) nor remembered past this
--- refresh -- the next refresh naturally retries.
+-- for an unchanged file -- is cached and returned as a table; no ctx, no range (no
+-- `ctx.base`), no `ctx.repo_root` (guarded here rather than letting `vim.system` silently
+-- fall back to the process cwd), or a non-zero exit all return `nil` and write nothing to
+-- the cache, so the failure is neither mistaken for "no changes" (identity mapping) nor
+-- remembered past this refresh -- the next refresh naturally retries.
 local function plain_hunks_for(entry_path)
   if plain_hunks_cache and plain_hunks_cache.path == entry_path then
     return plain_hunks_cache.hunks
   end
   local ctx = state_mod.get()
-  if not (ctx and ctx.base and ctx.repo_root) then
+  local range = state_mod.range()
+  if not (ctx and range and ctx.repo_root) then
     return nil
   end
-  local res = vim.system({ 'git', 'diff', '-U0', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = ctx.repo_root }):wait()
+  local res = vim.system({ 'git', 'diff', '-U0', range, '--', entry_path }, { text = true, cwd = ctx.repo_root }):wait()
   if res.code ~= 0 then
     local detail = res.stderr ~= '' and res.stderr or ('exit ' .. res.code)
     return nil, detail
