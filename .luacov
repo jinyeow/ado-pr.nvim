@@ -5,4 +5,5 @@ return {
   reportfile = 'luacov.report.out',
   include = { 'lua/ado%-pr/' },
   exclude = { 'tests/', 'prototypes/' },
+  includeuntestedfiles = { 'lua/ado-pr' },
 }
