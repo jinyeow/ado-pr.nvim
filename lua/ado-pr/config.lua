@@ -16,6 +16,11 @@ local defaults = {
     toggle_thread_pane = '<F8>',
     next_thread = ']t',
     prev_thread = '[t',
+    -- Overlapping threads on the same line: show_thread opens the pane (or,
+    -- pressed again without moving the cursor, cycles to the next covering
+    -- thread, wrapping); pick_thread opens a picker over all of them.
+    show_thread = '<F6>',
+    pick_thread = '<F7>',
   },
 }
 

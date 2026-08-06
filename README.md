@@ -38,6 +38,8 @@ require('ado-pr').setup({
     toggle_thread_pane = '<F8>', -- buffer-local to the diff, single-key by default
     next_thread = ']t',
     prev_thread = '[t',
+    show_thread = '<F6>', -- shows the narrowest thread here; pressed again on the same line, cycles
+    pick_thread = '<F7>', -- picks a specific thread from every one covering the line (fzf-lua)
   },
 })
 ```
@@ -88,7 +90,8 @@ tests/         headless assert specs (`nvim --headless -l tests/<name>_spec.lua`
 4. **[done] Thread follower pane** — a split below the diff shows the thread under the cursor;
    `<F8>` toggles it, `]t`/`[t` jump between threads, all buffer-local to the diff and
    user-configurable via `keymaps`. Overlapping threads show the narrowest covering one with a
-   visible count; cycling/picking between them is the next step. Needs a live-PR smoke test.
+   visible count; `<F6>` cycles through every thread covering the line (wrapping), `<F7>` picks
+   one directly (fzf-lua). Needs a live-PR smoke test.
 5. Iteration browsing, live refresh, reviewers, status checks.
 
 The hard part is step 2/3: anchoring threads onto diffview buffers. Side is taken from the **focused

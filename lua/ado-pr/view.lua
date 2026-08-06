@@ -61,6 +61,22 @@ function M.format_thread(thread, position)
   return lines
 end
 
+-- Pure: one covering thread's picker display line -- span and first comment,
+-- enough to tell overlapping threads apart (issue #8's picker requirement).
+-- No truncation of its own (fzf-lua's window handles long lines); a comment's
+-- embedded newlines collapse to a space so the whole thing stays one line.
+function M.picker_entry(item)
+  local span
+  if item.range.line_start == item.range.line_end then
+    span = ('line %d'):format(item.range.line_start)
+  else
+    span = ('lines %d-%d'):format(item.range.line_start, item.range.line_end)
+  end
+  local first = item.thread.comments and item.thread.comments[1]
+  local text = first and (first.content:gsub('\n', ' ')) or ''
+  return ('#%d  %s  %s'):format(item.thread.id, span, text)
+end
+
 -- ---------------------------------------------------------------------------
 -- Adapter: the pane window/buffer and diffview wiring
 -- ---------------------------------------------------------------------------
@@ -81,28 +97,139 @@ function M.is_open(tab)
   return s ~= nil and s.win ~= nil and vim.api.nvim_win_is_valid(s.win)
 end
 
+-- The path, cursor line, and threads covering it in diffview's right-side
+-- window, or nil when there is no diff window to read. Shared by refresh,
+-- show and pick -- the one place that reads "where is the cursor and what
+-- covers it here".
+local function covering_here(state)
+  if not (state and state.windows.b and state.windows.b.bufnr) then
+    return nil
+  end
+  local path = threads_mod.norm_repo_path(state.entry.path)
+  local line = vim.api.nvim_win_get_cursor(state.windows.b.winid)[1]
+  local covering = threads_mod.covering(resolved_threads.items_for(path), line)
+  return path, line, covering
+end
+
+local function set_pane_lines(s, lines)
+  vim.bo[s.buf].modifiable = true
+  vim.api.nvim_buf_set_lines(s.buf, 0, -1, false, lines)
+  vim.bo[s.buf].modifiable = false
+end
+
 -- Read whichever thread(s) cover the cursor in diffview's right-side window and
--- render the narrowest one, or the empty-state lines when the cursor is on none.
+-- render one of them, or the empty-state lines when the cursor is on none.
 -- Never touches the diff windows -- only reads their cursor position.
+--
+-- The cycle (path, line, index) set by show()/pick() is preserved here as
+-- long as the cursor is still on the same (path, line) -- otherwise a
+-- WinEnter refresh (e.g. a picker window closing) would silently snap a
+-- cycled or picked thread back to the narrowest one. Landing on a different
+-- (path, line) resets to the narrowest covering thread, per issue #8.
+--
+-- This passive refresh must never prime show()'s explicit-press state
+-- (`shown_*`): a CursorMoved/WinEnter firing here just because the cursor
+-- moved is not a keypress, so it clears `shown_*` whenever it lands on a
+-- (path, line) that state doesn't already match -- otherwise the very next
+-- show() would see a spurious match and skip straight past the narrowest
+-- thread instead of showing it first.
 function M.refresh(tab)
   tab = tab or vim.api.nvim_get_current_tabpage()
   if not M.is_open(tab) then
     return
   end
   local s = sessions[tab]
+  local path, line, covering = covering_here(diffview_state.current())
   local lines = M.EMPTY_LINES
-  local state = diffview_state.current()
-  if state and state.windows.b and state.windows.b.bufnr then
-    local line = vim.api.nvim_win_get_cursor(state.windows.b.winid)[1]
-    local items = resolved_threads.items_for(threads_mod.norm_repo_path(state.entry.path))
-    local covering = threads_mod.covering(items, line)
-    if #covering > 0 then
-      lines = M.format_thread(covering[1].thread, { index = 1, total = #covering })
+  if covering and #covering > 0 then
+    local index = 1
+    if s.cycle_path == path and s.cycle_line == line and s.cycle_index then
+      index = math.min(s.cycle_index, #covering)
     end
+    s.cycle_path, s.cycle_line, s.cycle_index = path, line, index
+    if not (s.shown_path == path and s.shown_line == line) then
+      s.shown_path, s.shown_line, s.shown_index = nil, nil, nil
+    end
+    lines = M.format_thread(covering[index].thread, { index = index, total = #covering })
+  else
+    s.cycle_path, s.cycle_line, s.cycle_index = nil, nil, nil
+    s.shown_path, s.shown_line, s.shown_index = nil, nil, nil
   end
-  vim.bo[s.buf].modifiable = true
-  vim.api.nvim_buf_set_lines(s.buf, 0, -1, false, lines)
-  vim.bo[s.buf].modifiable = false
+  set_pane_lines(s, lines)
+end
+
+-- The "show" key (issue #8): opens the pane when it is closed -- same first
+-- press as toggle_thread_pane -- or, when it is already open and the cursor
+-- has not left the line last *explicitly shown* (`shown_*`, distinct from
+-- `cycle_*` -- see refresh()), advances to the next thread covering that
+-- line, wrapping. A no-op (not an error) on a line with no thread, or with
+-- exactly one -- cycling one thread just re-shows it.
+function M.show(tab)
+  tab = tab or vim.api.nvim_get_current_tabpage()
+  if not M.is_open(tab) then
+    M.open(tab)
+    return
+  end
+  local s = sessions[tab]
+  local path, line, covering = covering_here(diffview_state.current())
+  if not (covering and #covering > 0) then
+    return
+  end
+  local index = 1
+  if s.shown_path == path and s.shown_line == line and s.shown_index then
+    index = (s.shown_index % #covering) + 1
+  end
+  s.cycle_path, s.cycle_line, s.cycle_index = path, line, index
+  s.shown_path, s.shown_line, s.shown_index = path, line, index
+  set_pane_lines(s, M.format_thread(covering[index].thread, { index = index, total = #covering }))
+end
+
+-- The "pick" key (issue #8): a picker (fzf-lua, matching picker.lua's
+-- convention) over every thread covering the cursor line, so a specific one
+-- is directly selectable instead of cycled to. Opens the pane if it was
+-- closed, but only once there is something to show -- a true no-op on a
+-- line with no thread, unlike show() which opens unconditionally first.
+function M.pick(tab)
+  tab = tab or vim.api.nvim_get_current_tabpage()
+  local path, line, covering = covering_here(diffview_state.current())
+  if not (covering and #covering > 0) then
+    return
+  end
+  if not M.is_open(tab) then
+    M.open(tab)
+  end
+  local ok, fzf = pcall(require, 'fzf-lua')
+  if not ok then
+    vim.notify('ado-pr: fzf-lua not found', vim.log.levels.ERROR)
+    return
+  end
+  local entries, index_of = {}, {}
+  for i, item in ipairs(covering) do
+    local entry = M.picker_entry(item)
+    index_of[entry] = i
+    table.insert(entries, entry)
+  end
+  fzf.fzf_exec(entries, {
+    prompt = 'Threads here> ',
+    actions = {
+      ['default'] = function(selected)
+        local index = selected and index_of[selected[1]]
+        -- Re-check is_open and the current path/line: fzf-lua's callback
+        -- runs async, and the pane may have been closed (bufhidden = 'wipe')
+        -- and reopened on a different location while the picker was open --
+        -- is_open alone would be true again for that new session, so the
+        -- stale selection must not overwrite it.
+        local now_path, now_line = covering_here(diffview_state.current())
+        if not index or not M.is_open(tab) or now_path ~= path or now_line ~= line then
+          return
+        end
+        local s = sessions[tab]
+        s.cycle_path, s.cycle_line, s.cycle_index = path, line, index
+        s.shown_path, s.shown_line, s.shown_index = path, line, index
+        set_pane_lines(s, M.format_thread(covering[index].thread, { index = index, total = #covering }))
+      end,
+    },
+  })
 end
 
 -- Snapshot/restore every window's scroll position (winsaveview) across a
@@ -141,6 +268,13 @@ function M.open(tab)
   vim.cmd(('botright %dsplit'):format(config.get().pane_height or DEFAULT_HEIGHT))
   local s = sessions[tab] or {}
   sessions[tab] = s
+  -- Reusing a prior session's table means the pane was previously open and
+  -- is no longer (M.is_open() above was already false) -- regardless of
+  -- whether it went away via M.close() or a direct window close (:close,
+  -- <C-w>c, issue #8), any cycle/shown state from that prior session is
+  -- stale and must not survive into this reopen.
+  s.cycle_path, s.cycle_line, s.cycle_index = nil, nil, nil
+  s.shown_path, s.shown_line, s.shown_index = nil, nil, nil
   s.win = vim.api.nvim_get_current_win()
   s.buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_win_set_buf(s.win, s.buf)
@@ -153,6 +287,10 @@ function M.open(tab)
   vim.api.nvim_set_current_win(prev)
   restore_views(views)
   M.refresh(tab)
+  -- Opening counts as the first explicit press (same as toggle_thread_pane):
+  -- prime `shown_*` from what refresh() just rendered so the next show()
+  -- advances instead of re-showing the narrowest thread.
+  s.shown_path, s.shown_line, s.shown_index = s.cycle_path, s.cycle_line, s.cycle_index
 end
 
 function M.close(tab)
@@ -164,6 +302,12 @@ function M.close(tab)
   local views = snapshot_views()
   vim.api.nvim_win_close(s.win, true)
   s.win, s.buf = nil, nil
+  -- Cycle/shown state is left as-is here: refresh() early-returns while the
+  -- pane is closed, so cursor movement during that time never touches it,
+  -- and it is stale regardless of how the window went away (M.close() here,
+  -- or a direct :close/<C-w>c, issue #8) -- M.open()'s reuse path is the one
+  -- place that clears it, since that is the only path a stale window-closed
+  -- session can be revived through either way.
   restore_views(views)
 end
 
@@ -244,6 +388,8 @@ local function setup_keymaps()
       vim.keymap.set('n', keymaps.prev_thread, function()
         M.jump(-1)
       end, { buffer = buf, desc = 'ado-pr: previous thread' })
+      vim.keymap.set('n', keymaps.show_thread, M.show, { buffer = buf, desc = 'ado-pr: show/cycle thread here' })
+      vim.keymap.set('n', keymaps.pick_thread, M.pick, { buffer = buf, desc = 'ado-pr: pick thread here' })
     end
   end
 end
