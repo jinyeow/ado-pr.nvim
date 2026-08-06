@@ -291,6 +291,12 @@ function M.close(tab)
   local views = snapshot_views()
   vim.api.nvim_win_close(s.win, true)
   s.win, s.buf = nil, nil
+  -- refresh() early-returns while the pane is closed, so cursor movement
+  -- during that time never resets the cycle/shown state -- clear it here,
+  -- the same way refresh() does on a threadless line, so a stale cycled
+  -- index never survives a close -> move -> reopen round trip (issue #8).
+  s.cycle_path, s.cycle_line, s.cycle_index = nil, nil, nil
+  s.shown_path, s.shown_line, s.shown_index = nil, nil, nil
   restore_views(views)
 end
 

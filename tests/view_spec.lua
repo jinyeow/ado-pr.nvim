@@ -743,6 +743,42 @@ do
   view.close(tab)
 end
 
+-- Issue #8: closing the pane must clear the cycle/shown state, not just the
+-- window. Cursor movement while the pane is closed never runs through
+-- refresh() (it early-returns on a closed pane), so close() is the only
+-- place left to reset that state -- otherwise a stale cycled index survives
+-- a full close -> move away -> move back -> reopen round trip.
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
+  set_view('jump.lua', win, buf)
+  resolved_threads.set_threads({ right_thread(1, 2, 2), right_thread(2, 1, 5) })
+
+  local tab = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_win_set_cursor(win, { 2, 0 })
+  view.open(tab)
+  view.show(tab) -- cycle to (2 of 2)
+  ok(pane_first_line(tab) == 'Thread #2  [active]   (2 of 2 here)', 'close-reset: cycled to the second thread before closing', pane_first_line(tab))
+
+  view.close(tab)
+
+  -- Cursor moves to a different covering line while the pane is closed --
+  -- refresh() early-returns on a closed pane, so this must not be the only
+  -- thing depended on to reset the cycle.
+  vim.api.nvim_win_set_cursor(win, { 5, 0 })
+  vim.api.nvim_win_set_cursor(win, { 2, 0 }) -- back to the original line
+
+  view.open(tab) -- reopen (same as pressing show on a closed pane)
+  ok(
+    pane_first_line(tab) == 'Thread #1  [active]   (1 of 2 here)',
+    'close-reset: reopening after visiting another line shows the narrowest thread, not the stale cycled one',
+    pane_first_line(tab)
+  )
+
+  view.close(tab)
+end
+
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
   for _, f in ipairs(failures) do
