@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2026-08-05
+## [0.1.0] - 2026-08-06
 
 ### Bug Fixes
 - Resolve az.cmd on Windows + strip az devops invoke preamble ([375d5de](https://github.com/jinyeow/ado-pr.nvim/commit/375d5de3216e804e3dcd7c80b2ce09ad4f59eb82))
@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Miscellaneous
 - Reformat with stylua, enforce lint gate (#41) ([d3dc12b](https://github.com/jinyeow/ado-pr.nvim/commit/d3dc12b2ae61b3b5cb3dd38193e67b5325b97893))
+- Add SemVer/CHANGELOG release process, luacheck lint, coverage CI (#46) ([d130aa6](https://github.com/jinyeow/ado-pr.nvim/commit/d130aa60d678ece9200db808a17f6015750fb41d))
 
 
 ### Refactoring
