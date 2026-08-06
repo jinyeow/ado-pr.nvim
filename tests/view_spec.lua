@@ -779,6 +779,53 @@ do
   view.close(tab)
 end
 
+-- Issue #8, direct window close: closing the pane's window via a Neovim
+-- window command (:close, <C-w>c) instead of M.close() must not leave the
+-- cycle/shown state stale either. M.is_open() already reports the pane as
+-- closed either way (it only checks win validity), but before this fix the
+-- state was cleared only inside M.close() itself -- never run when the
+-- window goes away by a different route -- so the stale index survived a
+-- reopen the same way as the close-reset test above.
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
+  set_view('jump.lua', win, buf)
+  resolved_threads.set_threads({ right_thread(1, 2, 2), right_thread(2, 1, 5) })
+
+  local tab = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_win_set_cursor(win, { 2, 0 })
+  view.open(tab)
+  view.show(tab) -- cycle to (2 of 2)
+  ok(pane_first_line(tab) == 'Thread #2  [active]   (2 of 2 here)', 'direct-close-reset: cycled to the second thread before closing', pane_first_line(tab))
+
+  local pane_win
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+    local b = vim.api.nvim_win_get_buf(w)
+    if vim.bo[b].buftype == 'nofile' and vim.bo[b].bufhidden == 'wipe' then
+      pane_win = w
+    end
+  end
+  -- Bypass M.close(): close the pane's window directly, the way :close or
+  -- <C-w>c would.
+  vim.api.nvim_win_close(pane_win, true)
+  ok(not view.is_open(tab), 'direct-close-reset: pane reports closed after a direct window close')
+
+  -- Cursor moves to a different covering line while the pane is closed --
+  -- refresh() early-returns on a closed pane either way.
+  vim.api.nvim_win_set_cursor(win, { 5, 0 })
+  vim.api.nvim_win_set_cursor(win, { 2, 0 }) -- back to the original line
+
+  view.open(tab) -- reopen (same as pressing show on a closed pane)
+  ok(
+    pane_first_line(tab) == 'Thread #1  [active]   (1 of 2 here)',
+    'direct-close-reset: reopening after a direct window close shows the narrowest thread, not the stale cycled one',
+    pane_first_line(tab)
+  )
+
+  view.close(tab)
+end
+
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
   for _, f in ipairs(failures) do

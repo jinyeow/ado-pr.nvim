@@ -264,6 +264,13 @@ function M.open(tab)
   vim.cmd(('botright %dsplit'):format(config.get().pane_height or DEFAULT_HEIGHT))
   local s = sessions[tab] or {}
   sessions[tab] = s
+  -- Reusing a prior session's table means the pane was previously open and
+  -- is no longer (M.is_open() above was already false) -- regardless of
+  -- whether it went away via M.close() or a direct window close (:close,
+  -- <C-w>c, issue #8), any cycle/shown state from that prior session is
+  -- stale and must not survive into this reopen.
+  s.cycle_path, s.cycle_line, s.cycle_index = nil, nil, nil
+  s.shown_path, s.shown_line, s.shown_index = nil, nil, nil
   s.win = vim.api.nvim_get_current_win()
   s.buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_win_set_buf(s.win, s.buf)
@@ -291,12 +298,12 @@ function M.close(tab)
   local views = snapshot_views()
   vim.api.nvim_win_close(s.win, true)
   s.win, s.buf = nil, nil
-  -- refresh() early-returns while the pane is closed, so cursor movement
-  -- during that time never resets the cycle/shown state -- clear it here,
-  -- the same way refresh() does on a threadless line, so a stale cycled
-  -- index never survives a close -> move -> reopen round trip (issue #8).
-  s.cycle_path, s.cycle_line, s.cycle_index = nil, nil, nil
-  s.shown_path, s.shown_line, s.shown_index = nil, nil, nil
+  -- Cycle/shown state is left as-is here: refresh() early-returns while the
+  -- pane is closed, so cursor movement during that time never touches it,
+  -- and it is stale regardless of how the window went away (M.close() here,
+  -- or a direct :close/<C-w>c, issue #8) -- M.open()'s reuse path is the one
+  -- place that clears it, since that is the only path a stale window-closed
+  -- session can be revived through either way.
   restore_views(views)
 end
 
