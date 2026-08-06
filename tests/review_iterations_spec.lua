@@ -332,6 +332,40 @@ do
   ok(has_level(vim.log.levels.ERROR), 'select_iteration: unknown id notifies ERROR')
 end
 
+-- select_iteration/reset_window guard against diffview not being available, the same way
+-- browse_iterations already does -- both call DiffviewOpen/DiffviewClose too.
+do
+  reset()
+  open_pr()
+  calls, signs_calls, view_calls, set_threads_calls = {}, {}, {}, {}
+  package.loaded['diffview'] = nil
+
+  review.select_iteration(iterations, 3)
+
+  ok(#cmd_calls() == 0, 'select_iteration: no diffview never opens a diff')
+  ok(has_level(vim.log.levels.ERROR), 'select_iteration: no diffview notifies ERROR')
+  ok(#set_threads_calls == 0, 'select_iteration: no diffview never fetches/wires threads')
+
+  package.loaded['diffview'] = {}
+end
+
+do
+  reset()
+  open_pr()
+  review.select_iteration(iterations, 3)
+  calls, signs_calls, view_calls, set_threads_calls = {}, {}, {}, {}
+  package.loaded['diffview'] = nil
+
+  review.reset_window()
+
+  ok(#cmd_calls() == 0, 'reset_window: no diffview never opens a diff')
+  ok(has_level(vim.log.levels.ERROR), 'reset_window: no diffview notifies ERROR')
+  ok(#set_threads_calls == 0, 'reset_window: no diffview never fetches/wires threads')
+  ok(state.get().window ~= nil, 'reset_window: no diffview leaves state.window untouched')
+
+  package.loaded['diffview'] = {}
+end
+
 -- reset_window restores the full-PR view: diffs pr_base...HEAD, fetches with
 -- list_threads (untracked, no window), and clears state.window.
 do

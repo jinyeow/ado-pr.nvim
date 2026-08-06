@@ -233,14 +233,26 @@ end
 -- `Git difftool` split cleanly isn't supported.
 local FULL_VIEW_LABEL = 'Full PR (all iterations)'
 
+-- Diffview-only feature -- retargeting the vim-fugitive fallback's `Git difftool` split
+-- cleanly isn't supported (see M.browse_iterations' own comment above). Shared by
+-- browse_iterations, select_iteration and reset_window, since all three call
+-- DiffviewOpen/DiffviewClose. Returns true, or false after notifying the same ERROR
+-- browse_iterations always has.
+local function ensure_diffview()
+  if pcall(require, 'diffview') then
+    return true
+  end
+  vim.notify('ado-pr: iteration browsing needs diffview.nvim', vim.log.levels.ERROR)
+  return false
+end
+
 function M.browse_iterations()
   local ctx = state.get()
   if not (ctx and ctx.repositoryId) then
     vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
     return
   end
-  if not pcall(require, 'diffview') then
-    vim.notify('ado-pr: iteration browsing needs diffview.nvim', vim.log.levels.ERROR)
+  if not ensure_diffview() then
     return
   end
   local iterations, ierr = az.list_iterations(ctx)
@@ -292,6 +304,9 @@ function M.select_iteration(iterations, id)
     vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
     return
   end
+  if not ensure_diffview() then
+    return
+  end
   local resolved, werr = M.window_for(iterations, id)
   if not resolved then
     vim.notify('ado-pr: ' .. werr, vim.log.levels.ERROR)
@@ -322,6 +337,9 @@ function M.reset_window()
     return
   end
   if not ctx.window then
+    return
+  end
+  if not ensure_diffview() then
     return
   end
   open_diff_range(ctx.pr_base, 'HEAD')
