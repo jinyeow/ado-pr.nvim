@@ -126,6 +126,13 @@ end
 -- WinEnter refresh (e.g. a picker window closing) would silently snap a
 -- cycled or picked thread back to the narrowest one. Landing on a different
 -- (path, line) resets to the narrowest covering thread, per issue #8.
+--
+-- This passive refresh must never prime show()'s explicit-press state
+-- (`shown_*`): a CursorMoved/WinEnter firing here just because the cursor
+-- moved is not a keypress, so it clears `shown_*` whenever it lands on a
+-- (path, line) that state doesn't already match -- otherwise the very next
+-- show() would see a spurious match and skip straight past the narrowest
+-- thread instead of showing it first.
 function M.refresh(tab)
   tab = tab or vim.api.nvim_get_current_tabpage()
   if not M.is_open(tab) then
@@ -140,18 +147,23 @@ function M.refresh(tab)
       index = math.min(s.cycle_index, #covering)
     end
     s.cycle_path, s.cycle_line, s.cycle_index = path, line, index
+    if not (s.shown_path == path and s.shown_line == line) then
+      s.shown_path, s.shown_line, s.shown_index = nil, nil, nil
+    end
     lines = M.format_thread(covering[index].thread, { index = index, total = #covering })
   else
     s.cycle_path, s.cycle_line, s.cycle_index = nil, nil, nil
+    s.shown_path, s.shown_line, s.shown_index = nil, nil, nil
   end
   set_pane_lines(s, lines)
 end
 
 -- The "show" key (issue #8): opens the pane when it is closed -- same first
 -- press as toggle_thread_pane -- or, when it is already open and the cursor
--- has not left the line last shown, advances to the next thread covering
--- that line, wrapping. A no-op (not an error) on a line with no thread, or
--- with exactly one -- cycling one thread just re-shows it.
+-- has not left the line last *explicitly shown* (`shown_*`, distinct from
+-- `cycle_*` -- see refresh()), advances to the next thread covering that
+-- line, wrapping. A no-op (not an error) on a line with no thread, or with
+-- exactly one -- cycling one thread just re-shows it.
 function M.show(tab)
   tab = tab or vim.api.nvim_get_current_tabpage()
   if not M.is_open(tab) then
@@ -164,10 +176,11 @@ function M.show(tab)
     return
   end
   local index = 1
-  if s.cycle_path == path and s.cycle_line == line and s.cycle_index then
-    index = (s.cycle_index % #covering) + 1
+  if s.shown_path == path and s.shown_line == line and s.shown_index then
+    index = (s.shown_index % #covering) + 1
   end
   s.cycle_path, s.cycle_line, s.cycle_index = path, line, index
+  s.shown_path, s.shown_line, s.shown_index = path, line, index
   set_pane_lines(s, M.format_thread(covering[index].thread, { index = index, total = #covering }))
 end
 
@@ -207,6 +220,7 @@ function M.pick(tab)
         end
         local s = sessions[tab]
         s.cycle_path, s.cycle_line, s.cycle_index = path, line, index
+        s.shown_path, s.shown_line, s.shown_index = path, line, index
         set_pane_lines(s, M.format_thread(covering[index].thread, { index = index, total = #covering }))
       end,
     },
@@ -261,6 +275,10 @@ function M.open(tab)
   vim.api.nvim_set_current_win(prev)
   restore_views(views)
   M.refresh(tab)
+  -- Opening counts as the first explicit press (same as toggle_thread_pane):
+  -- prime `shown_*` from what refresh() just rendered so the next show()
+  -- advances instead of re-showing the narrowest thread.
+  s.shown_path, s.shown_line, s.shown_index = s.cycle_path, s.cycle_line, s.cycle_index
 end
 
 function M.close(tab)

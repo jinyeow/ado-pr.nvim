@@ -581,6 +581,36 @@ do
   view.close(tab)
 end
 
+-- A passive refresh (CursorMoved/WinEnter firing while the pane is already
+-- open, e.g. the cursor arriving at a new line) must not count as the first
+-- explicit press: the first show() on a freshly-arrived line has to render
+-- its narrowest covering thread, not skip straight to the second one.
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
+  set_view('jump.lua', win, buf)
+  resolved_threads.set_threads({ right_thread(1, 3, 3), right_thread(2, 1, 5) })
+
+  local tab = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+  view.open(tab) -- pane opens on line 1, its only covering thread
+
+  -- Cursor moves (passively, not via a keypress) to line 3, which two
+  -- threads cover. Simulate the CursorMoved/WinEnter autocmd directly.
+  vim.api.nvim_win_set_cursor(win, { 3, 0 })
+  view.refresh(tab)
+
+  view.show(tab) -- first explicit press on this freshly-arrived line
+  ok(
+    pane_first_line(tab) == 'Thread #1  [active]   (1 of 2 here)',
+    'show: first press on a freshly-arrived line shows the narrowest thread, not the second',
+    pane_first_line(tab)
+  )
+
+  view.close(tab)
+end
+
 -- A file switch that happens to land on the same line number must also
 -- reset the cycle -- the cycle is keyed on (path, line), not line alone.
 do
@@ -653,6 +683,46 @@ do
   ok(view.is_open(tab), 'show on closed pane: first press opens it')
   ok(pane_first_line(tab) == 'Thread #1  [active]', 'show on closed pane: shows the narrowest covering thread', pane_first_line(tab))
 
+  view.close(tab)
+end
+
+-- M.pick's fzf-lua selection callback (actions.default): choosing an entry
+-- renders that thread with its position, opens a closed pane first, and the
+-- cycle state it writes is what show()/refresh() build on afterwards.
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
+  set_view('jump.lua', win, buf)
+  resolved_threads.set_threads({ right_thread(1, 2, 2), right_thread(2, 1, 5) })
+
+  local tab = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_win_set_cursor(win, { 2, 0 })
+
+  -- Stub fzf-lua's fzf_exec to synchronously invoke the default action, as
+  -- if the user picked the second (wider) entry from the list.
+  package.loaded['fzf-lua'] = {
+    fzf_exec = function(entries, opts)
+      opts.actions['default']({ entries[2] })
+    end,
+  }
+
+  ok(not view.is_open(tab), 'pick on closed pane: starts closed')
+  view.pick(tab)
+  ok(view.is_open(tab), 'pick: opens the pane when closed')
+  ok(pane_first_line(tab) == 'Thread #2  [active]   (2 of 2 here)', 'pick: selecting an entry renders that thread with its position', pane_first_line(tab))
+
+  view.show(tab) -- builds on the picked state: wraps back around to the first
+  ok(pane_first_line(tab) == 'Thread #1  [active]   (1 of 2 here)', 'pick: a following show() advances from the picked index', pane_first_line(tab))
+
+  view.refresh(tab) -- same-line refresh preserves the cycled index
+  ok(
+    pane_first_line(tab) == 'Thread #1  [active]   (1 of 2 here)',
+    'pick: a following refresh() preserves the index a pick then a show left behind',
+    pane_first_line(tab)
+  )
+
+  package.loaded['fzf-lua'] = nil
   view.close(tab)
 end
 
