@@ -20,6 +20,18 @@ local M = {}
 ---                            signs.lua's self-computed `git diff` must run against this,
 ---                            never `vim.fn.getcwd()` at refresh time (the cursor may have
 ---                            moved windows/tabs by then).
+---@field head string|nil     the resolved commit the diff's right side is at -- nil means
+---                            HEAD (the checked-out worktree), the case while reviewing the
+---                            full PR. Set to an iteration's sourceRefCommit while browsing
+---                            iterations (review.select_iteration), so signs.lua diffs the
+---                            same range diffview was opened against.
+---@field pr_base string|nil  the PR's original resolved base commit (review.open's `base`),
+---                            immutable for the session -- review.reset_window reopens
+---                            against this to restore the full-PR view after browsing
+---                            iterations, since `base` itself gets overwritten per window.
+---@field window table|nil    the active iteration window, `{ iteration, base_iteration }`,
+---                            or nil for the plain full-PR view (docs/design/
+---                            pr-comment-threads.md's `resolve(thread, window)` contract).
 
 ---@type AdoPrContext|nil
 local current = nil
@@ -32,6 +44,17 @@ end
 ---@return AdoPrContext|nil
 function M.get()
   return current
+end
+
+-- The commit range signs.lua's self-computed `git diff` and review.lua's `DiffviewOpen`
+-- both diff against, from one source of truth -- `base` alone (see `head`'s doc above), so
+-- the two never independently drift on what "the current diff" means. nil when no PR is
+-- under review or its base hasn't resolved yet.
+function M.range()
+  if not (current and current.base) then
+    return nil
+  end
+  return current.base .. '...' .. (current.head or 'HEAD')
 end
 
 function M.clear()

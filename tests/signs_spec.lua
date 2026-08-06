@@ -354,6 +354,31 @@ do
   restore_system()
 end
 
+-- diff1_plain with an iteration window active: `head`/`pr_base` (issue-9-browse-iterations)
+-- overwrite state.base/state.head to the iteration's own commit pair, so the self-computed
+-- `git diff` must use state_mod.range()'s window range, not the hardcoded '...HEAD' full-PR
+-- range.
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'c2', pr_base = 'deadbeef', head = 'c3', repo_root = '/review-root' })
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'plain.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  system_result = { code = 0, stdout = '', stderr = '' }
+  resolved_threads.set_threads({ make_thread('plain.lua', 'left', 11, 11, 'active') })
+  signs.refresh()
+
+  ok(#system_calls == 1, 'refresh diff1_plain iteration window: git diff invoked once', #system_calls)
+  local call = system_calls[1]
+  eq(call.cmd, { 'git', 'diff', '-U0', 'c2...c3', '--', 'plain.lua' }, 'refresh diff1_plain iteration window: git diff argv uses the window range')
+  restore_system()
+end
+
 -- code == 0 with empty stdout is a legitimate "no changes" result: {} is cached and
 -- identity mapping applies (a left-side line outside any hunk maps to its own row).
 do
@@ -817,6 +842,40 @@ do
 
   restore_system()
   restore_notify()
+end
+
+-- Sign-group teardown race: switching diffview iterations closes the current view
+-- (firing DiffviewViewClosed, which defers augroup teardown via vim.schedule_wrap) and
+-- then immediately re-attaches for the reopened view, all inside the same event-loop
+-- tick -- the deferred teardown only actually runs on a later tick. A second attach()
+-- call before that deferred callback fires must not let it tear down the live (second)
+-- attach's augroup.
+do
+  signs.attach()
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewClosed' })
+  -- Second attach() runs synchronously, before the first close's deferred teardown
+  -- (scheduled by vim.schedule_wrap above) gets a chance to execute.
+  signs.attach()
+  vim.wait(10)
+
+  local live_ok, autocmds = pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreads' })
+  ok(live_ok, "teardown race: second attach() augroup survives first attach()'s deferred close", autocmds)
+  if live_ok then
+    local has_win_enter = false
+    for _, ac in ipairs(autocmds) do
+      if ac.event == 'WinEnter' then
+        has_win_enter = true
+      end
+    end
+    ok(has_win_enter, 'teardown race: second attach() autocmds still registered')
+  end
+
+  -- Normal teardown still works: firing close for the *current* (second) attach's group
+  -- and flushing does tear it down.
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewClosed' })
+  vim.wait(10)
+  local gone_ok = pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreads' })
+  ok(not gone_ok, 'teardown race: normal close still tears the augroup down')
 end
 
 if #failures > 0 then

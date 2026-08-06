@@ -119,30 +119,33 @@ local function clamped_dedup_lines(lines, line_count)
 end
 
 -- Self-computed hunk table for diff1_plain/diff1_raw, which attach no diffview diff
--- renderer to read one from. `git diff <base>...HEAD -- <path>` is the exact range
--- review.lua already opened diffview against, run against the review root captured at
--- open (never `vim.fn.getcwd()`, which can differ by refresh time). `-U0` keeps every
--- hunk a single contiguous change run with no surrounding context lines folded in --
--- without it, git's default ~3 lines of context on each side can merge separate nearby
--- changes into one hunk whose old_count/new_count then span unrelated context, which
--- breaks paired_row's offset math below (it assumes old_count/new_count only cover
--- genuinely changed lines).
+-- renderer to read one from. `git diff state_mod.range() -- <path>` (`<base>...<head>`,
+-- `head` defaulting to `HEAD`) is the exact range review.lua already opened diffview
+-- against -- the SAME range whether that's the full PR (`base...HEAD`) or an iteration
+-- window (`base...HEAD` overwritten to that iteration's own commit pair by
+-- review.select_iteration) -- run against the review root captured at open (never
+-- `vim.fn.getcwd()`, which can differ by refresh time). `-U0` keeps every hunk a single
+-- contiguous change run with no surrounding context lines folded in -- without it, git's
+-- default ~3 lines of context on each side can merge separate nearby changes into one hunk
+-- whose old_count/new_count then span unrelated context, which breaks paired_row's offset
+-- math below (it assumes old_count/new_count only cover genuinely changed lines).
 --
 -- Returns hunks, err. Only a `code == 0` result -- including a legitimately empty parse
--- for an unchanged file -- is cached and returned as a table; no ctx, no `ctx.base`, no
--- `ctx.repo_root` (guarded here rather than letting `vim.system` silently fall back to the
--- process cwd), or a non-zero exit all return `nil` and write nothing to the cache, so the
--- failure is neither mistaken for "no changes" (identity mapping) nor remembered past this
--- refresh -- the next refresh naturally retries.
+-- for an unchanged file -- is cached and returned as a table; no ctx, no range (no
+-- `ctx.base`), no `ctx.repo_root` (guarded here rather than letting `vim.system` silently
+-- fall back to the process cwd), or a non-zero exit all return `nil` and write nothing to
+-- the cache, so the failure is neither mistaken for "no changes" (identity mapping) nor
+-- remembered past this refresh -- the next refresh naturally retries.
 local function plain_hunks_for(entry_path)
   if plain_hunks_cache and plain_hunks_cache.path == entry_path then
     return plain_hunks_cache.hunks
   end
   local ctx = state_mod.get()
-  if not (ctx and ctx.base and ctx.repo_root) then
+  local range = state_mod.range()
+  if not (ctx and range and ctx.repo_root) then
     return nil
   end
-  local res = vim.system({ 'git', 'diff', '-U0', ctx.base .. '...HEAD', '--', entry_path }, { text = true, cwd = ctx.repo_root }):wait()
+  local res = vim.system({ 'git', 'diff', '-U0', range, '--', entry_path }, { text = true, cwd = ctx.repo_root }):wait()
   if res.code ~= 0 then
     local detail = res.stderr ~= '' and res.stderr or ('exit ' .. res.code)
     return nil, detail
@@ -357,7 +360,12 @@ function M.refresh()
   end
 end
 
-local group
+-- Bumped on every attach() call so a deferred teardown scheduled by an older attach() can
+-- tell it is no longer current. Not the augroup id: nvim_create_augroup('AdoPrThreads', ...)
+-- returns the SAME id across calls as long as the name still exists, so an id captured at
+-- schedule time is indistinguishable from the id a later attach() call reassigns -- only a
+-- monotonic counter actually discriminates "which attach() call scheduled this".
+local attach_generation = 0
 -- Hook diffview's buffer-enter event so signs re-apply as the user moves between files --
 -- diffview swaps content into an existing buffer rather than running placement once at
 -- open. Torn down on DiffviewViewClosed so a closed review doesn't leave a WinEnter
@@ -365,7 +373,9 @@ local group
 function M.attach()
   last_notified_hunks_err = nil
   last_notified_count = nil
-  group = vim.api.nvim_create_augroup('AdoPrThreads', { clear = true })
+  attach_generation = attach_generation + 1
+  local generation = attach_generation
+  local group = vim.api.nvim_create_augroup('AdoPrThreads', { clear = true })
   vim.api.nvim_create_autocmd('User', {
     group = group,
     pattern = { 'DiffviewDiffBufWinEnter', 'DiffviewViewOpened' },
@@ -380,9 +390,13 @@ function M.attach()
     pattern = 'DiffviewViewClosed',
     -- Deleting the augroup from inside its own callback errors ("autocommands are
     -- locked"); defer to the next event-loop tick, same as diffview.nvim's own teardown.
+    -- Switching diffview iterations closes then re-attaches within the same tick, so a
+    -- later attach() can already be live by the time this runs -- only tear down the
+    -- augroup this callback was scheduled for if no newer attach() has superseded it.
     callback = vim.schedule_wrap(function()
-      vim.api.nvim_del_augroup_by_id(group)
-      group = nil
+      if generation == attach_generation then
+        vim.api.nvim_del_augroup_by_id(group)
+      end
     end),
   })
 end
