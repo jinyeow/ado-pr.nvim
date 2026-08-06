@@ -26,4 +26,8 @@ function M.comment(text)
   return require('ado-pr.review').comment(text)
 end
 
+function M.browse_iterations()
+  return require('ado-pr.review').browse_iterations()
+end
+
 return M

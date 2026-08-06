@@ -243,4 +243,43 @@ function M.list_threads_tracked(ctx, iteration, base_iteration)
   return decode_threads(az_json(args))
 end
 
+-- Same `{ count, value = {...} }` list envelope as decode_threads, over
+-- `pullRequestIterations` instead -- a malformed envelope (missing/wrong-typed `value`)
+-- raises rather than silently defaulting to "no iterations". Returns (iterations|nil, err|nil).
+local function decode_iterations(decoded, err)
+  if not decoded then
+    return nil, err
+  end
+  if type(decoded) ~= 'table' or type(decoded.value) ~= 'table' then
+    return nil, 'malformed iteration response: expected { count, value = {...} } envelope, got ' .. vim.inspect(decoded)
+  end
+  return decoded.value, nil
+end
+
+-- Enumerate the PR's iterations (one per push) -- the data behind the Updates-dropdown-style
+-- stepper (docs/design/pr-comment-threads.md, slice 3). Same `az devops invoke` transport
+-- and `az login` session as the rest of this module.
+function M.list_iterations(ctx)
+  local args = {
+    'devops',
+    'invoke',
+    '--area',
+    'git',
+    '--resource',
+    'pullRequestIterations',
+    '--http-method',
+    'GET',
+    '--route-parameters',
+    'project=' .. ctx.project,
+    'repositoryId=' .. ctx.repositoryId,
+    'pullRequestId=' .. tostring(ctx.id),
+    '--api-version',
+    config.get().api_version,
+    '--output',
+    'json',
+  }
+  vim.list_extend(args, org_args())
+  return decode_iterations(az_json(args))
+end
+
 return M

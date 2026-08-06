@@ -15,14 +15,17 @@ local threads_mod = require('ado-pr.threads')
 local resolved = {}
 local pr_level = 0
 
--- Store the renderable threads for the active PR (a plain fetch -- no iteration window).
--- Both left- and right-anchored threads are kept; PR-level (no threadContext) human
--- threads are counted, not stored. Every call replaces the collection with a fresh
--- table rather than mutating the old one in place -- signs.lua relies on that fresh
--- identity (M.all() returning a different table than a previous call did) to notice a
--- new review session's data has landed, without this module needing to know anything
--- about signs.lua's own trackers.
-function M.set_threads(threads)
+-- Store the renderable threads for the active PR. `window` is the iteration window this
+-- `threads` list was fetched under (nil for a plain fetch, `{ iteration, base_iteration }`
+-- for a tracked fetch via az.list_threads_tracked) -- forwarded to threads_mod.resolve per
+-- the design contract, though resolve() itself doesn't branch on it (the response already
+-- reflects that window's side/position). Both left- and right-anchored threads are kept;
+-- PR-level (no threadContext) human threads are counted, not stored. Every call replaces
+-- the collection with a fresh table rather than mutating the old one in place -- signs.lua
+-- relies on that fresh identity (M.all() returning a different table than a previous call
+-- did) to notice a new review session's (or a new iteration window's) data has landed,
+-- without this module needing to know anything about signs.lua's own trackers.
+function M.set_threads(threads, window)
   resolved, pr_level = {}, 0
   for _, t in ipairs(threads or {}) do
     if threads_mod.is_renderable(t) then
@@ -30,7 +33,7 @@ function M.set_threads(threads)
       if not path then
         pr_level = pr_level + 1
       else
-        local range = threads_mod.resolve(t, nil)
+        local range = threads_mod.resolve(t, window)
         if range then
           table.insert(resolved, { thread = t, path = threads_mod.norm_repo_path(path), range = range })
         end
