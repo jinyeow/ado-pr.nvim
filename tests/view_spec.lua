@@ -743,6 +743,62 @@ do
   view.close(tab)
 end
 
+-- M.pick's fzf-lua callback runs asynchronously: the pane can be closed and
+-- reopened on a *different* location (correctly resetting that session's
+-- cycle/shown state) before the callback fires. `M.is_open` alone can't
+-- catch this -- it's true again for the new pane -- so a stale selection
+-- must not overwrite the freshly-reset session just because the tab still
+-- has a pane open.
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3', 'l4', 'l5' })
+  set_view('jump.lua', win, buf)
+  resolved_threads.set_threads({ right_thread(1, 2, 2), right_thread(2, 1, 3), right_thread(3, 4, 4) })
+
+  local tab = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_win_set_cursor(win, { 2, 0 })
+
+  -- Stub fzf-lua's fzf_exec to retain the callback instead of invoking it
+  -- synchronously, so the test controls when it fires -- same shape as
+  -- fzf-lua's real async picker.
+  local pending
+  package.loaded['fzf-lua'] = {
+    fzf_exec = function(entries, opts)
+      pending = { entries = entries, action = opts.actions['default'] }
+    end,
+  }
+
+  view.pick(tab) -- captures line 2, opens the pane, leaves the callback pending
+  ok(pending ~= nil, 'stale pick: callback captured, not yet invoked')
+
+  -- Close the pane directly (bypassing M.pick's own flow) and reopen it on a
+  -- different line, which resets that session's cycle/shown state.
+  local pane_win
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+    local b = vim.api.nvim_win_get_buf(w)
+    if vim.bo[b].buftype == 'nofile' and vim.bo[b].bufhidden == 'wipe' then
+      pane_win = w
+    end
+  end
+  vim.api.nvim_win_close(pane_win, true)
+  vim.api.nvim_win_set_cursor(win, { 4, 0 })
+  view.open(tab)
+  ok(pane_first_line(tab) == 'Thread #3  [active]', 'stale pick: reopen on a different line shows its own thread', pane_first_line(tab))
+
+  -- The stale picker callback fires now, as if the user had picked the
+  -- second (wider) entry back on line 2.
+  pending.action({ pending.entries[2] })
+  ok(
+    pane_first_line(tab) == 'Thread #3  [active]',
+    'stale pick: a callback from a closed-and-reopened session does not overwrite the new session',
+    pane_first_line(tab)
+  )
+
+  package.loaded['fzf-lua'] = nil
+  view.close(tab)
+end
+
 -- Issue #8: a closed pane must not carry its cycle/shown state into the next
 -- reopen. Cursor movement while the pane is closed never runs through
 -- refresh() (it early-returns on a closed pane), so open()'s reuse of the

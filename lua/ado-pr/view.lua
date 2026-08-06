@@ -214,9 +214,13 @@ function M.pick(tab)
     actions = {
       ['default'] = function(selected)
         local index = selected and index_of[selected[1]]
-        -- Re-check is_open: fzf-lua's callback runs async, and the pane may
-        -- have been closed (bufhidden = 'wipe') while the picker was open.
-        if not index or not M.is_open(tab) then
+        -- Re-check is_open and the current path/line: fzf-lua's callback
+        -- runs async, and the pane may have been closed (bufhidden = 'wipe')
+        -- and reopened on a different location while the picker was open --
+        -- is_open alone would be true again for that new session, so the
+        -- stale selection must not overwrite it.
+        local now_path, now_line = covering_here(diffview_state.current())
+        if not index or not M.is_open(tab) or now_path ~= path or now_line ~= line then
           return
         end
         local s = sessions[tab]
