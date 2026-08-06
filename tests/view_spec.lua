@@ -686,6 +686,23 @@ do
   view.close(tab)
 end
 
+-- Pick is a true no-op on a threadless line: with the pane closed, picking
+-- on a line with zero covering threads must not open it (matching pick's
+-- docstring), unlike show() which opens first unconditionally.
+do
+  local win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'l1', 'l2', 'l3' })
+  set_view('jump.lua', win, buf)
+  resolved_threads.set_threads({ right_thread(1, 2, 2) })
+
+  local tab = vim.api.nvim_get_current_tabpage()
+  vim.api.nvim_win_set_cursor(win, { 1, 0 }) -- outside the thread's range
+  ok(not view.is_open(tab), 'pick on threadless line: starts closed')
+  view.pick(tab)
+  ok(not view.is_open(tab), 'pick on threadless line: pane stays closed')
+end
+
 -- M.pick's fzf-lua selection callback (actions.default): choosing an entry
 -- renders that thread with its position, opens a closed pane first, and the
 -- cycle state it writes is what show()/refresh() build on afterwards.

@@ -186,16 +186,17 @@ end
 
 -- The "pick" key (issue #8): a picker (fzf-lua, matching picker.lua's
 -- convention) over every thread covering the cursor line, so a specific one
--- is directly selectable instead of cycled to. Opens the pane first if it
--- was closed, same as show(). A no-op on a line with no thread.
+-- is directly selectable instead of cycled to. Opens the pane if it was
+-- closed, but only once there is something to show -- a true no-op on a
+-- line with no thread, unlike show() which opens unconditionally first.
 function M.pick(tab)
   tab = tab or vim.api.nvim_get_current_tabpage()
-  if not M.is_open(tab) then
-    M.open(tab)
-  end
   local path, line, covering = covering_here(diffview_state.current())
   if not (covering and #covering > 0) then
     return
+  end
+  if not M.is_open(tab) then
+    M.open(tab)
   end
   local ok, fzf = pcall(require, 'fzf-lua')
   if not ok then
