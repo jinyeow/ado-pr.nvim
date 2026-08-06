@@ -819,6 +819,40 @@ do
   restore_notify()
 end
 
+-- Sign-group teardown race: switching diffview iterations closes the current view
+-- (firing DiffviewViewClosed, which defers augroup teardown via vim.schedule_wrap) and
+-- then immediately re-attaches for the reopened view, all inside the same event-loop
+-- tick -- the deferred teardown only actually runs on a later tick. A second attach()
+-- call before that deferred callback fires must not let it tear down the live (second)
+-- attach's augroup.
+do
+  signs.attach()
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewClosed' })
+  -- Second attach() runs synchronously, before the first close's deferred teardown
+  -- (scheduled by vim.schedule_wrap above) gets a chance to execute.
+  signs.attach()
+  vim.wait(10)
+
+  local live_ok, autocmds = pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreads' })
+  ok(live_ok, "teardown race: second attach() augroup survives first attach()'s deferred close", autocmds)
+  if live_ok then
+    local has_win_enter = false
+    for _, ac in ipairs(autocmds) do
+      if ac.event == 'WinEnter' then
+        has_win_enter = true
+      end
+    end
+    ok(has_win_enter, 'teardown race: second attach() autocmds still registered')
+  end
+
+  -- Normal teardown still works: firing close for the *current* (second) attach's group
+  -- and flushing does tear it down.
+  vim.api.nvim_exec_autocmds('User', { pattern = 'DiffviewViewClosed' })
+  vim.wait(10)
+  local gone_ok = pcall(vim.api.nvim_get_autocmds, { group = 'AdoPrThreads' })
+  ok(not gone_ok, 'teardown race: normal close still tears the augroup down')
+end
+
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
   for _, f in ipairs(failures) do

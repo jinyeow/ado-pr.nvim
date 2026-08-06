@@ -360,7 +360,12 @@ function M.refresh()
   end
 end
 
-local group
+-- Bumped on every attach() call so a deferred teardown scheduled by an older attach() can
+-- tell it is no longer current. Not the augroup id: nvim_create_augroup('AdoPrThreads', ...)
+-- returns the SAME id across calls as long as the name still exists, so an id captured at
+-- schedule time is indistinguishable from the id a later attach() call reassigns -- only a
+-- monotonic counter actually discriminates "which attach() call scheduled this".
+local attach_generation = 0
 -- Hook diffview's buffer-enter event so signs re-apply as the user moves between files --
 -- diffview swaps content into an existing buffer rather than running placement once at
 -- open. Torn down on DiffviewViewClosed so a closed review doesn't leave a WinEnter
@@ -368,7 +373,9 @@ local group
 function M.attach()
   last_notified_hunks_err = nil
   last_notified_count = nil
-  group = vim.api.nvim_create_augroup('AdoPrThreads', { clear = true })
+  attach_generation = attach_generation + 1
+  local generation = attach_generation
+  local group = vim.api.nvim_create_augroup('AdoPrThreads', { clear = true })
   vim.api.nvim_create_autocmd('User', {
     group = group,
     pattern = { 'DiffviewDiffBufWinEnter', 'DiffviewViewOpened' },
@@ -383,9 +390,13 @@ function M.attach()
     pattern = 'DiffviewViewClosed',
     -- Deleting the augroup from inside its own callback errors ("autocommands are
     -- locked"); defer to the next event-loop tick, same as diffview.nvim's own teardown.
+    -- Switching diffview iterations closes then re-attaches within the same tick, so a
+    -- later attach() can already be live by the time this runs -- only tear down the
+    -- augroup this callback was scheduled for if no newer attach() has superseded it.
     callback = vim.schedule_wrap(function()
-      vim.api.nvim_del_augroup_by_id(group)
-      group = nil
+      if generation == attach_generation then
+        vim.api.nvim_del_augroup_by_id(group)
+      end
     end),
   })
 end
