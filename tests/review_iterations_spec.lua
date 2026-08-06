@@ -75,12 +75,14 @@ do
   eq(resolved.base_commit, 'c2', 'window_for: base_commit is the previous iterations sourceRefCommit')
 end
 
--- The first iteration has no iteration before it -- falls back to its own targetRefCommit
--- (the target branch tip it was compared against), not a made-up id 0.
+-- The first iteration has no iteration before it -- ADO's iteration ids are zero-based,
+-- with iteration 0 being the merge-base commit between source and target, so iteration 1's
+-- base is 0, not itself. Falls back to its own targetRefCommit (the target branch tip it
+-- was compared against) for that base commit.
 do
   local resolved, err = review.window_for(iterations, 1)
   ok(resolved and not err, 'window_for: no error for iteration 1', err)
-  eq(resolved.window, { iteration = 1, base_iteration = 1 }, 'window_for: iteration 1 bases against itself')
+  eq(resolved.window, { iteration = 1, base_iteration = 0 }, 'window_for: iteration 1 bases against iteration 0')
   eq(resolved.head_commit, 'c1', 'window_for: iteration 1 head_commit')
   eq(resolved.base_commit, 'base0', 'window_for: iteration 1 base_commit falls back to targetRefCommit')
 end

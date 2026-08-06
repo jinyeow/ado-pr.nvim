@@ -101,11 +101,12 @@ end
 -- diff, given `az.list_iterations`' own shape. "One push at a time" (the issue's framing)
 -- means base_iteration = id - 1 -- an iteration diffs against the PREVIOUS iteration's own
 -- source commit, not the whole PR base, so browsing iteration N shows just what that push
--- changed. The first iteration has no iteration before it, so it bases against its own
--- targetRefCommit (the target branch tip that iteration was compared against) instead.
--- ADO's exact $baseIteration semantics for the id==1 edge could not be confirmed without a
--- live PR (see the ticket's "smoke-tested against a live PR" criterion) -- this is the
--- documented assumption to revisit if a live run disagrees. Returns
+-- changed. ADO's iteration ids are zero-based: "iteration 0" is the merge-base commit
+-- between source and target branches, and "iteration 1" is the head of the source branch at
+-- PR creation (confirmed via Microsoft's PR iteration model docs) -- so iteration 1's base
+-- is iteration 0, not itself. Iteration 0 is never returned by `az.list_iterations` (it
+-- starts numbering at 1), so that base falls back to iteration 1's own targetRefCommit (the
+-- target branch tip it was compared against) instead of an `by_id` lookup. Returns
 -- ({ window = { iteration, base_iteration }, base_commit, head_commit }|nil, err|nil).
 function M.window_for(iterations, id)
   local by_id = {}
@@ -120,9 +121,9 @@ function M.window_for(iterations, id)
   if not head_commit then
     return nil, 'iteration ' .. tostring(id) .. ' has no sourceRefCommit'
   end
-  local base_id = id > 1 and (id - 1) or id
+  local base_id = id > 1 and (id - 1) or 0
   local base_commit
-  if base_id == id then
+  if id == 1 then
     base_commit = selected.targetRefCommit and selected.targetRefCommit.commitId
   else
     local base_iter = by_id[base_id]
