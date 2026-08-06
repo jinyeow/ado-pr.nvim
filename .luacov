@@ -1,0 +1,9 @@
+-- luacov config -- coverage instrumentation for the CI `coverage` job only
+-- (tests/*_spec.lua run uninstrumented in the `test` job, same as today).
+return {
+  statsfile = 'luacov.stats.out',
+  reportfile = 'luacov.report.out',
+  include = { 'lua/ado%-pr/' },
+  exclude = { 'tests/', 'prototypes/' },
+  includeuntestedfiles = { 'lua/ado-pr' },
+}

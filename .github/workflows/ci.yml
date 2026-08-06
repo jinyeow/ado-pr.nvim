@@ -39,3 +39,49 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           version: latest
           args: --check lua/ tests/
+
+  luacheck:
+    name: luacheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lunarmodules/luacheck@v1
+        with:
+          args: lua/ tests/
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: stable
+
+      - name: Install luacov
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y lua5.1 luarocks
+          sudo luarocks install luacov
+          sudo luarocks install luafilesystem
+
+      - name: Run test suite instrumented with luacov
+        run: |
+          set -euo pipefail
+          eval "$(luarocks path)"
+          rm -f luacov.stats.out
+          for f in tests/*.lua; do
+            nvim --headless --cmd "lua require('luacov')" -l "$f"
+          done
+          luacov
+
+      - name: Publish coverage summary
+        run: |
+          {
+            echo "### Coverage (\`lua/ado-pr/\`)"
+            echo '```'
+            cat luacov.report.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

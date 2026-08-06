@@ -47,7 +47,6 @@ package.loaded['ado-pr.view'] = {
   end,
 }
 
-local az = require('ado-pr.az')
 local review = require('ado-pr.review')
 local state = require('ado-pr.state')
 

@@ -1,0 +1,41 @@
+name: Release
+
+# Triggered by pushing a `vX.Y.Z` tag (see the "Cutting a release" section in
+# README.md for the manual steps -- CHANGELOG.md is regenerated and committed
+# *before* the tag is created and pushed, not by this workflow). This job only
+# turns an already-pushed tag into a GitHub Release, using that tag's own
+# CHANGELOG.md section as the release notes.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract this tag's changelog section
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          version_re=$(printf '%s' "$version" | sed 's/[.[\*^$()+?{}|]/\\&/g')
+          awk -v ver="## \\[$version_re\\]" '
+            $0 ~ "^" ver { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::No CHANGELOG.md section found for $GITHUB_REF_NAME -- update CHANGELOG.md before tagging."
+            exit 1
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          generate_release_notes: false

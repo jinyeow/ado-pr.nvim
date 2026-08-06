@@ -1,9 +1,14 @@
 # ado-pr.nvim
 
+[![CI](https://github.com/jinyeow/ado-pr.nvim/actions/workflows/ci.yml/badge.svg)](https://github.com/jinyeow/ado-pr.nvim/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/jinyeow/ado-pr.nvim)](https://github.com/jinyeow/ado-pr.nvim/releases)
+
 Review **Azure DevOps** pull requests from Neovim — the gap `octo.nvim` leaves (it's GitHub-only).
 
-> **Status: MVP.** Pick / checkout / diff active PRs, set a vote, and post/show inline comment
-> threads through the `az` CLI. Not yet smoke-tested against a live PR; not published.
+> **Status: MVP, pre-1.0.** Pick / checkout / diff active PRs, set a vote, and post/show inline
+> comment threads through the `az` CLI — smoke-tested live against a real org. See
+> [CHANGELOG.md](CHANGELOG.md) for release notes; not on a plugin manager registry yet, install
+> straight from this repo (see below).
 
 ## Why
 
@@ -91,6 +96,27 @@ diff pane** (right = new, left = old), and the path from diffview's `cur_entry` 
 file, never the file-tree cursor (the **cobalt** gotcha: "the cursor's file and the displayed file are
 different things"). See `E:\Personal Projects\cobalt`, a vim-flavored ADO TUI whose tested client the
 thread-body shape here mirrors.
+
+## Releasing
+
+Versioned with [SemVer](https://semver.org/); pre-1.0 (`0.y.z`) means breaking changes can land in a
+minor bump. `CHANGELOG.md` is generated from [conventional commit](https://www.conventionalcommits.org/)
+messages via [`git-cliff`](https://git-cliff.org/) (config: `cliff.toml`) — write commits normally,
+nothing else to maintain day to day.
+
+Cutting a release:
+
+```sh
+git-cliff --tag vX.Y.Z -o CHANGELOG.md   # regenerate, review the new section
+git add CHANGELOG.md
+git commit -m "chore(release): vX.Y.Z"
+git tag vX.Y.Z
+git push origin main vX.Y.Z
+```
+
+Pushing the tag triggers `.github/workflows/release.yml`, which extracts that version's
+`CHANGELOG.md` section and publishes it as a GitHub Release. The commit must land before the tag —
+the release workflow fails loudly if it can't find a matching `## [X.Y.Z]` section.
 
 ## Related
 

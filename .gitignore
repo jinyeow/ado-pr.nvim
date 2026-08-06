@@ -2,6 +2,10 @@
 *.luac
 tags
 
+# luacov coverage output (CI-generated, see .luacov)
+luacov.stats.out
+luacov.report.out
+
 # OS
 .DS_Store
 Thumbs.db
