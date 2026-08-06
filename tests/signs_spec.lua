@@ -354,6 +354,31 @@ do
   restore_system()
 end
 
+-- diff1_plain with an iteration window active: `head`/`pr_base` (issue-9-browse-iterations)
+-- overwrite state.base/state.head to the iteration's own commit pair, so the self-computed
+-- `git diff` must use state_mod.range()'s window range, not the hardcoded '...HEAD' full-PR
+-- range.
+do
+  state.clear()
+  state.set({ id = 1, repositoryId = 'r', project = 'p', base = 'c2', pr_base = 'deadbeef', head = 'c3', repo_root = '/review-root' })
+  local buf_b = make_buf(50)
+  current_snapshot = {
+    entry = { path = 'plain.lua' },
+    layout = 'diff1_plain',
+    windows = { b = { bufnr = buf_b } },
+    hunks = nil,
+  }
+  stub_system()
+  system_result = { code = 0, stdout = '', stderr = '' }
+  resolved_threads.set_threads({ make_thread('plain.lua', 'left', 11, 11, 'active') })
+  signs.refresh()
+
+  ok(#system_calls == 1, 'refresh diff1_plain iteration window: git diff invoked once', #system_calls)
+  local call = system_calls[1]
+  eq(call.cmd, { 'git', 'diff', '-U0', 'c2...c3', '--', 'plain.lua' }, 'refresh diff1_plain iteration window: git diff argv uses the window range')
+  restore_system()
+end
+
 -- code == 0 with empty stdout is a legitimate "no changes" result: {} is cached and
 -- identity mapping applies (a left-side line outside any hunk maps to its own row).
 do
