@@ -646,7 +646,9 @@ do
   ok(state.get().window == nil, 'precondition: not browsing an iteration window')
   review.comment('should not post')
 
-  ok(has_level(vim.log.levels.ERROR), 'comment left + override: refused with an ERROR', vim.inspect(notifications))
+  local msg = notifications[1] and notifications[1].msg or ''
+  ok(notifications[1] and notifications[1].level == vim.log.levels.ERROR, 'comment left + override: refused with an ERROR', vim.inspect(notifications))
+  ok(msg:find(':AdoPrResetDiffBase', 1, true) ~= nil, 'comment left + override: names the remedy command', msg)
   ok(#post_calls == 0, 'comment left + override: no thread posted')
   -- A deleted file is left-side only (anchor.resolve rejects its right side, and yields
   -- side = 'left' from the left pane -- tests/anchor_spec.lua), so it takes this same
@@ -665,6 +667,29 @@ do
 
   ok(#post_calls == 1, 'comment right + override: thread still posted', #post_calls)
   ok(not has_level(vim.log.levels.ERROR), 'comment right + override: no ERROR', vim.inspect(notifications))
+end
+
+-- An iteration window and an override can both be active at once. M.comment checks the
+-- window first, so that rejection wins -- the override guard never runs, and the user is
+-- told the reason that actually applies (leave the window, not reset the override).
+do
+  reset()
+  open_pr()
+  arm_override_revparse()
+  review.set_diff_base('release/1.2')
+  review.select_iteration(iterations, 3)
+  notifications, post_calls = {}, {}
+  anchor_side = 'left'
+
+  ok(state.get().window ~= nil, 'precondition: browsing an iteration window')
+  eq(state.get().override_base, 'cafef00d', 'precondition: override still active')
+  review.comment('should not post')
+
+  local msg = notifications[1] and notifications[1].msg or ''
+  ok(notifications[1] and notifications[1].level == vim.log.levels.ERROR, 'comment left + window + override: refused with an ERROR', vim.inspect(notifications))
+  ok(msg:find(':AdoPrIterations', 1, true) ~= nil, 'comment left + window + override: the window rejection wins', msg)
+  ok(msg:find(':AdoPrResetDiffBase', 1, true) == nil, 'comment left + window + override: not the override rejection', msg)
+  ok(#post_calls == 0, 'comment left + window + override: no thread posted')
 end
 
 -- The discriminating case: the left side is only blocked BECAUSE an override is active.
