@@ -198,7 +198,7 @@ end
 -- Effective organization/project/repository, each with the source it came from, in
 -- SCOPE_ORDER. A field that cannot be resolved carries its reason instead of aborting the
 -- whole report -- saying WHY nothing resolved is the point of `:AdoPrShowScope`.
-function M.scope_status()
+local function scope_status()
   local status = {}
   for _, field in ipairs(SCOPE_ORDER) do
     local value, err = resolve_field(field)
@@ -215,7 +215,7 @@ end
 -- `:AdoPrShowScope` entry point: report the effective scope and where each field came from.
 function M.show_scope()
   local lines = {}
-  for _, entry in ipairs(M.scope_status()) do
+  for _, entry in ipairs(scope_status()) do
     if entry.value then
       table.insert(lines, ('%s = %s (%s)'):format(entry.field, entry.value, entry.source))
     else
