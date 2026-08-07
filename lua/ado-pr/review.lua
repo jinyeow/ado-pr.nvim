@@ -18,12 +18,15 @@ local state = require('ado-pr.state')
 -- at refresh time. `pr_base` mirrors `base` at open time -- the PR's original resolved base,
 -- kept immutable for the session so M.reset_window can restore the full-PR view after
 -- M.select_iteration has overwritten `base`/`head` with an iteration window's commits.
-local function capture_context(id, pr, base, repo_root)
+-- `project` is the value M.open already resolved (setup() or auto-detected) before checkout --
+-- passed in rather than re-read from config.get() here, which would silently go back to nil in
+-- auto-detect mode (config.get() never carries a detected value, only an explicit setup() one).
+local function capture_context(id, pr, base, repo_root, project)
   local repo = pr.repository or {}
   state.set({
     id = id,
     repositoryId = repo.id,
-    project = (repo.project and repo.project.name) or config.get().project,
+    project = (repo.project and repo.project.name) or project,
     base = base,
     pr_base = base,
     repo_root = repo_root,
@@ -212,6 +215,19 @@ end
 
 function M.open(id)
   local cwd = vim.fn.getcwd()
+  -- Resolved (setup() or auto-detected -- config.resolve_organization/resolve_project) BEFORE
+  -- checkout, which mutates the worktree: a repo with no/ambiguous ADO remote match must fail
+  -- loud here, not after `az repos pr checkout` has already switched the working branch.
+  local org, oerr = config.resolve_organization()
+  if not org then
+    vim.notify('ado-pr: ' .. oerr, vim.log.levels.ERROR)
+    return
+  end
+  local project, pjerr = config.resolve_project()
+  if not project then
+    vim.notify('ado-pr: ' .. pjerr, vim.log.levels.ERROR)
+    return
+  end
   local ok, err = az.checkout(id)
   if not ok then
     vim.notify('ado-pr: checkout failed: ' .. err, vim.log.levels.ERROR)
@@ -236,7 +252,7 @@ function M.open(id)
   end
   -- Only now that the diff has actually opened does the active-PR state
   -- (which :AdoPrComment relies on) switch to this PR.
-  capture_context(id, pr, base, cwd)
+  capture_context(id, pr, base, cwd, project)
 
   wire_threads(state.get(), nil)
   -- The follower pane depends on Diffview window/scene APIs (and its teardown

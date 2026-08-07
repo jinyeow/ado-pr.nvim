@@ -51,43 +51,71 @@ local function az_json(args)
 end
 M.az_json = az_json
 
--- Shared --organization/--project args from config.
+-- Shared --organization/--project args, resolved from explicit setup() or auto-detected from
+-- the repo's git remotes (config.resolve_organization/resolve_project -- docs/specs/
+-- per-directory-ado-config.md). Returns (nil, err) on an unresolvable field so callers can
+-- fail loud instead of letting `az` run scopeless and error downstream.
 local function scope_args()
-  local a, c = {}, config.get()
-  if c.organization then
-    vim.list_extend(a, { '--organization', c.organization })
+  local a = {}
+  local org, oerr = config.resolve_organization()
+  if not org then
+    return nil, oerr
   end
-  if c.project then
-    vim.list_extend(a, { '--project', c.project })
+  vim.list_extend(a, { '--organization', org })
+  local project, perr = config.resolve_project()
+  if not project then
+    return nil, perr
   end
-  return a
+  vim.list_extend(a, { '--project', project })
+  return a, nil
 end
 
 -- Just --organization. `az devops invoke` takes project via --route-parameters,
 -- not --project, so it must not get the full scope_args.
 local function org_args()
-  local a, c = {}, config.get()
-  if c.organization then
-    vim.list_extend(a, { '--organization', c.organization })
+  local org, err = config.resolve_organization()
+  if not org then
+    return nil, err
   end
-  return a
+  return { '--organization', org }, nil
+end
+
+-- Resolve --organization and run az_json(args ++ org_args) -- the "resolve org, bail on
+-- failure, append, invoke" shape every `az devops invoke` call below needs (post_thread,
+-- list_threads, list_threads_tracked, list_iterations), collapsed to one call site each.
+local function az_json_org_scoped(args)
+  local org, err = org_args()
+  if not org then
+    return nil, err
+  end
+  vim.list_extend(args, org)
+  return az_json(args)
 end
 
 -- List active PRs for the configured repo.
 function M.list_prs()
   local args = { 'repos', 'pr', 'list', '--status', 'active', '--output', 'json' }
-  local c = config.get()
-  if c.repository then
-    vim.list_extend(args, { '--repository', c.repository })
+  local repository, rerr = config.resolve_repository()
+  if not repository then
+    return nil, rerr
   end
-  vim.list_extend(args, scope_args())
+  vim.list_extend(args, { '--repository', repository })
+  local scope, serr = scope_args()
+  if not scope then
+    return nil, serr
+  end
+  vim.list_extend(args, scope)
   return az_json(args)
 end
 
 -- Show one PR by id.
 function M.show_pr(id)
   local args = { 'repos', 'pr', 'show', '--id', tostring(id), '--output', 'json' }
-  vim.list_extend(args, scope_args())
+  local scope, serr = scope_args()
+  if not scope then
+    return nil, serr
+  end
+  vim.list_extend(args, scope)
   return az_json(args)
 end
 
@@ -105,7 +133,11 @@ end
 -- vote: 'approve'|'approve-with-suggestions'|'wait-for-author'|'reject'|'reset'
 function M.set_vote(id, vote)
   local args = { 'repos', 'pr', 'set-vote', '--id', tostring(id), '--vote', vote }
-  vim.list_extend(args, scope_args())
+  local scope, serr = scope_args()
+  if not scope then
+    return false, serr
+  end
+  vim.list_extend(args, scope)
   local res = vim.system(az_cmdline(args), { text = true }):wait()
   return res.code == 0, (res.code ~= 0 and (res.stderr ~= '' and res.stderr or 'set-vote failed') or nil)
 end
@@ -161,8 +193,7 @@ function M.post_thread(ctx, anchor, content)
     '--output',
     'json',
   }
-  vim.list_extend(args, org_args())
-  local decoded, err = az_json(args)
+  local decoded, err = az_json_org_scoped(args)
   os.remove(tmp)
   if not decoded then
     return nil, err
@@ -208,8 +239,7 @@ function M.list_threads(ctx)
     '--output',
     'json',
   }
-  vim.list_extend(args, org_args())
-  return decode_threads(az_json(args))
+  return decode_threads(az_json_org_scoped(args))
 end
 
 -- Thread list fetched under an iteration window: `$iteration`/`$baseIteration`
@@ -239,8 +269,7 @@ function M.list_threads_tracked(ctx, iteration, base_iteration)
     '--output',
     'json',
   }
-  vim.list_extend(args, org_args())
-  return decode_threads(az_json(args))
+  return decode_threads(az_json_org_scoped(args))
 end
 
 -- Same `{ count, value = {...} }` list envelope as decode_threads, over
@@ -278,8 +307,7 @@ function M.list_iterations(ctx)
     '--output',
     'json',
   }
-  vim.list_extend(args, org_args())
-  return decode_iterations(az_json(args))
+  return decode_iterations(az_json_org_scoped(args))
 end
 
 return M
