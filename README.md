@@ -33,7 +33,8 @@ Auth reuses `az login`. **No PAT or secret is stored by this plugin.**
 the current repo's ADO git remote (`origin` first, falling back to the repo's other remotes;
 a zero- or multiple-match repo fails loud with a `vim.notify` ERROR rather than guessing). Set
 any of the three explicitly to skip detection for that field, e.g. when the remote doesn't
-reflect where PRs actually live:
+reflect where PRs actually live. To override detection for the current session only, without
+touching your config, use `:AdoPrSetScope` (see Commands):
 
 ```lua
 require('ado-pr').setup({
@@ -61,6 +62,9 @@ require('ado-pr').setup({
 | `:AdoPrVote <id> <vote>` | `approve` / `approve-with-suggestions` / `wait-for-author` / `reject` / `reset` |
 | `:AdoPrComment` | Comment on the diff line under the cursor (right/left side from the focused pane) |
 | `:AdoPrIterations` | Browse the PR's iterations (one push at a time), or return to the full-PR view |
+| `:AdoPrSetScope <field>=<value>…` | Override the auto-detected `organization`/`project`/`repository` for this Neovim session only (never written to disk); an explicit `setup()` value for a field still wins |
+| `:AdoPrShowScope` | Show the effective `organization`/`project`/`repository` and whether each came from `setup()`, the session override, or auto-detection |
+| `:AdoPrResetScope [field…]` | Clear the session scope override for the named fields (bare names, e.g. `project repository`), or for all three when given none |
 | `:AdoPrSetDiffBase <ref>` | Override the Full-PR-view diff base to any git ref (branch/tag/SHA) — local visualization only, never touches the PR's real ADO target |
 | `:AdoPrShowDiffBase` | Show the currently effective diff base, and whether it's an override or the ADO-resolved default |
 | `:AdoPrResetDiffBase` | Clear the diff-base override, returning to the ADO-resolved target |

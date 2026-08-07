@@ -15,6 +15,57 @@ local function ok(cond, name, detail)
   end
 end
 
+-- The precedence-resolution function is pure -- all 8 combinations of (explicit setup() value,
+-- session override, detected value), most-explicit-and-most-recent first (spec: `setup()`
+-- explicit value > session override > auto-detection).
+do
+  local E, O, D = 'explicit', 'override', 'detected'
+  ok(config.effective_scope_value(E, O, D) == E, 'precedence: explicit + override + detected -> explicit')
+  ok(config.effective_scope_value(E, O, nil) == E, 'precedence: explicit + override -> explicit')
+  ok(config.effective_scope_value(E, nil, D) == E, 'precedence: explicit + detected -> explicit')
+  ok(config.effective_scope_value(E, nil, nil) == E, 'precedence: explicit only -> explicit')
+  ok(config.effective_scope_value(nil, O, D) == O, 'precedence: override + detected -> override')
+  ok(config.effective_scope_value(nil, O, nil) == O, 'precedence: override only -> override')
+  ok(config.effective_scope_value(nil, nil, D) == D, 'precedence: detected only -> detected')
+  ok(config.effective_scope_value(nil, nil, nil) == nil, 'precedence: nothing set -> nil')
+
+  -- Its counterpart, which names the winning source for `:AdoPrShowScope`.
+  ok(config.effective_scope_source(E, O, D) == 'setup()', 'source: explicit wins')
+  ok(config.effective_scope_source(nil, O, D) == 'override', 'source: override beats detected')
+  ok(config.effective_scope_source(nil, nil, D) == 'detected', 'source: detected only')
+  ok(config.effective_scope_source(nil, nil, nil) == nil, 'source: nothing set -> nil')
+end
+
+-- The :AdoPrSetScope argument parser is pure. `field=value` tokens; a value runs until the next
+-- recognised `field=` token, so a project name with spaces needs no quoting (Neovim's command
+-- line strips none anyway).
+do
+  local fields, err = config.parse_scope_args({ 'organization=https://dev.azure.com/Org', 'project=TSC', 'Cloud', 'Platform', 'repository=Repo' })
+  ok(err == nil, 'parse: multi-word value accepted', tostring(err))
+  ok(fields and fields.organization == 'https://dev.azure.com/Org', 'parse: organization')
+  ok(fields and fields.project == 'TSC Cloud Platform', 'parse: project keeps its spaces')
+  ok(fields and fields.repository == 'Repo', 'parse: repository')
+
+  local partial = config.parse_scope_args({ 'project=Only This' })
+  ok(partial and partial.project == 'Only This' and partial.organization == nil, 'parse: only the fields given are returned')
+
+  local none, nerr = config.parse_scope_args({})
+  ok(none == nil and nerr ~= nil, 'parse: no arguments is an error')
+  local bad, berr = config.parse_scope_args({ 'wat=1' })
+  ok(bad == nil and berr ~= nil, 'parse: unknown field is an error', tostring(berr))
+  local loose, lerr = config.parse_scope_args({ 'MyRepo' })
+  ok(loose == nil and lerr ~= nil, 'parse: a value with no leading field= is an error')
+  local blank, blerr = config.parse_scope_args({ 'project=' })
+  ok(blank == nil and blerr ~= nil, 'parse: an empty value is an error')
+  local dup, derr = config.parse_scope_args({ 'project=A', 'project=B' })
+  ok(dup == nil and derr ~= nil, 'parse: the same field given twice is an error', vim.inspect(dup))
+
+  -- A token that merely looks like `field=value` but names no recognised field is part of the
+  -- value being accumulated, not a new marker -- values run until the next RECOGNISED field=.
+  local eq = config.parse_scope_args({ 'project=TSC', 'a=b', 'Platform' })
+  ok(eq and eq.project == 'TSC a=b Platform', 'parse: a token containing = continues the current value', vim.inspect(eq))
+end
+
 local scratch_root = os.getenv('TEMP') and (os.getenv('TEMP') .. '/ado-pr-config-resolve-spec') or '/tmp/ado-pr-config-resolve-spec'
 local function scratch_cwd(name)
   local dir = scratch_root .. '/' .. name
@@ -117,7 +168,140 @@ do
   ok(org1 == org2 and git_remote_calls == 1, 'cache: a second resolve for an already-detected cwd reuses the cache')
 end
 
+-- Session override (:AdoPrSetScope / :AdoPrShowScope / :AdoPrResetScope). Kept LAST in this
+-- file deliberately: unlike the per-cwd detection cache the override is session-global, so
+-- setting it earlier would leak into every later detection case. Blocks below that need a
+-- clean slate clear it with config.reset_scope() rather than relying on ordering. Everything
+-- goes through the command entry points (set_scope/reset_scope take raw fargs), so argument
+-- parsing and the invalid-input path are exercised end to end.
+local notifications = {}
+local real_notify = vim.notify
+vim.notify = function(msg, level)
+  table.insert(notifications, { msg = msg, level = level })
+end
+local function last_notify()
+  return notifications[#notifications] or {}
+end
+
+do
+  vim.fn.chdir(scratch_cwd('override'))
+  config.setup({})
+  vim.system = function(cmd, _opts)
+    error('vim.system should not run when a session override covers every field: ' .. vim.inspect(cmd))
+  end
+  config.set_scope({ 'organization=https://dev.azure.com/OverrideOrg', 'project=Override', 'Project', 'repository=OverrideRepo' })
+  local org, oerr = config.resolve_organization()
+  local project, perr = config.resolve_project()
+  local repo, rerr = config.resolve_repository()
+  ok(org == 'https://dev.azure.com/OverrideOrg' and oerr == nil, 'override: organization beats detection', tostring(oerr))
+  ok(project == 'Override Project' and perr == nil, 'override: project beats detection', tostring(project))
+  ok(repo == 'OverrideRepo' and rerr == nil, 'override: repository beats detection')
+
+  -- A later call updates only the fields it names -- the rest of the override stands.
+  config.set_scope({ 'repository=SecondRepo' })
+  ok(config.resolve_repository() == 'SecondRepo', 'override: a later call replaces that field')
+  ok(config.resolve_project() == 'Override Project', 'override: fields not named by a later call are kept')
+
+  -- An invalid :AdoPrSetScope call is reported and changes nothing.
+  notifications = {}
+  config.set_scope({ 'wat=1' })
+  ok(last_notify().level == vim.log.levels.ERROR, 'override: an unknown field notifies an ERROR', vim.inspect(last_notify()))
+  ok(config.resolve_repository() == 'SecondRepo', 'override: an invalid call leaves the override untouched')
+
+  -- An explicit setup() value for a field is never overridden by the session command.
+  config.setup({ project = 'Explicit Project' })
+  ok(config.resolve_project() == 'Explicit Project', 'override: explicit setup() project still wins')
+  ok(config.resolve_repository() == 'SecondRepo', 'override: unset setup() fields still come from the override')
+
+  -- The override is in memory only -- it never reaches the setup() config table.
+  ok(config.get().repository == nil, 'override: not written into the setup() config table')
+end
+
+-- Exactly one field overridden: that field uses the override, the other two are still
+-- auto-detected, and detection still runs (one shell-out, shared via the per-cwd cache).
+do
+  vim.fn.chdir(scratch_cwd('override_partial'))
+  config.setup({})
+  config.reset_scope({})
+  local git_remote_calls = 0
+  vim.system = function(cmd, _opts)
+    return {
+      wait = function()
+        if cmd[1] == 'git' and cmd[2] == 'remote' then
+          git_remote_calls = git_remote_calls + 1
+          return { code = 0, stdout = 'origin\thttps://dev.azure.com/DetectedOrg/Detected%20Project/_git/DetectedRepo (fetch)\n', stderr = '' }
+        end
+        error('unexpected vim.system call: ' .. vim.inspect(cmd))
+      end,
+    }
+  end
+  config.set_scope({ 'repository=OnlyRepo' })
+  ok(config.resolve_repository() == 'OnlyRepo', 'partial override: the overridden field uses the override')
+  ok(config.resolve_organization() == 'https://dev.azure.com/DetectedOrg', 'partial override: organization still auto-detected')
+  ok(config.resolve_project() == 'Detected Project', 'partial override: project still auto-detected')
+  ok(git_remote_calls == 1, 'partial override: detection still runs for the un-overridden fields', tostring(git_remote_calls))
+
+  -- :AdoPrShowScope names every field's effective value and where it came from.
+  notifications = {}
+  config.show_scope()
+  local shown = last_notify().msg or ''
+  ok(shown:match('repository = OnlyRepo %(override%)'), 'show: the overridden field is reported as an override', shown)
+  ok(shown:match('organization = https://dev%.azure%.com/DetectedOrg %(detected%)'), 'show: a detected field is reported as detected', shown)
+
+  -- :AdoPrResetScope <field> clears only that field.
+  config.set_scope({ 'organization=https://dev.azure.com/OverrideOrg' })
+  config.reset_scope({ 'organization' })
+  ok(config.resolve_organization() == 'https://dev.azure.com/DetectedOrg', 'reset: the named field falls back to detection')
+  ok(config.resolve_repository() == 'OnlyRepo', 'reset: fields not named are kept')
+
+  -- Resetting a field that carries no override is a no-op, and says so rather than claiming
+  -- to have cleared something.
+  notifications = {}
+  config.reset_scope({ 'organization' })
+  ok(last_notify().level == vim.log.levels.INFO, 'reset: a no-op reset still notifies at INFO', vim.inspect(last_notify()))
+  ok((last_notify().msg or ''):match('no active session scope override'), 'reset: a no-op reset says nothing was cleared', last_notify().msg)
+
+  notifications = {}
+  config.reset_scope({ 'nope' })
+  ok(last_notify().level == vim.log.levels.ERROR, 'reset: an unknown field notifies an ERROR')
+  ok(config.resolve_repository() == 'OnlyRepo', 'reset: an invalid call leaves the override untouched')
+
+  -- No arguments clears all three, but only the fields that actually had an override are
+  -- named in the notification.
+  notifications = {}
+  config.reset_scope({})
+  local reset_msg = last_notify().msg or ''
+  ok(reset_msg:match('cleared') and reset_msg:match('repository'), 'reset: the cleared field is named', reset_msg)
+  ok(not reset_msg:match('organization'), 'reset: a field with no override is not reported as cleared', reset_msg)
+  ok(config.resolve_repository() == 'DetectedRepo', 'reset: no arguments clears every field')
+end
+
+-- Detection failure is reported per field by :AdoPrShowScope, not turned into an abort.
+do
+  vim.fn.chdir(scratch_cwd('show_unresolved'))
+  config.setup({})
+  config.reset_scope({})
+  stub_git_remote('origin\tgit@github.com:jinyeow/ado-pr.nvim.git (fetch)\n')
+  config.set_scope({ 'project=Shown Project' })
+  notifications = {}
+  config.show_scope()
+  local shown = last_notify().msg or ''
+  ok(shown:match('project = Shown Project %(override%)'), 'show: the resolvable field is still reported', shown)
+  ok(shown:match('organization = unresolved'), 'show: an undetectable field reports why', shown)
+
+  config.reset_scope({})
+  -- A bare reset-all with nothing left overridden reports the no-op too.
+  notifications = {}
+  config.reset_scope({})
+  ok(
+    (last_notify().msg or ''):match('no active session scope override'),
+    'reset: reset-all with nothing overridden says nothing was cleared',
+    last_notify().msg
+  )
+end
+
 vim.system = real_system
+vim.notify = real_notify
 vim.fn.chdir(real_cwd)
 
 if #failures > 0 then

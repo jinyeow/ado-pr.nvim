@@ -9,6 +9,18 @@ function M.setup(opts)
   M.config.setup(opts)
 end
 
+function M.set_scope(fargs)
+  return M.config.set_scope(fargs)
+end
+
+function M.show_scope()
+  return M.config.show_scope()
+end
+
+function M.reset_scope(fargs)
+  return M.config.reset_scope(fargs)
+end
+
 -- Lazy accessors so `require('ado-pr')` stays cheap at startup.
 function M.pick()
   return require('ado-pr.picker').pick()
