@@ -94,6 +94,18 @@ do
   eq(resolved.base_commit, 'base0', 'window_for: iteration 1 base_commit falls back to targetRefCommit')
 end
 
+-- When ADO does report a `commonRefCommit` (the merge-base at that push) it wins over
+-- `targetRefCommit`: the latter is only the target branch tip AT PUSH TIME, so a target
+-- branch that has moved since would drag unrelated upstream commits into the diff.
+do
+  local with_common = {
+    { id = 1, sourceRefCommit = { commitId = 'c1' }, targetRefCommit = { commitId = 'stale0' }, commonRefCommit = { commitId = 'merge0' } },
+  }
+  local resolved, err = review.window_for(with_common, 1)
+  ok(resolved and not err, 'window_for: no error for iteration 1 with commonRefCommit', err)
+  eq(resolved.base_commit, 'merge0', 'window_for: iteration 1 base_commit prefers commonRefCommit')
+end
+
 -- An unknown iteration id errors rather than silently picking one.
 do
   local resolved, err = review.window_for(iterations, 99)
