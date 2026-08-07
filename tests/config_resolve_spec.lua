@@ -15,6 +15,44 @@ local function ok(cond, name, detail)
   end
 end
 
+-- The precedence-resolution function is pure -- all 8 combinations of (explicit setup() value,
+-- session override, detected value), most-explicit-and-most-recent first (spec: `setup()`
+-- explicit value > session override > auto-detection).
+do
+  local E, O, D = 'explicit', 'override', 'detected'
+  ok(config.effective_scope_value(E, O, D) == E, 'precedence: explicit + override + detected -> explicit')
+  ok(config.effective_scope_value(E, O, nil) == E, 'precedence: explicit + override -> explicit')
+  ok(config.effective_scope_value(E, nil, D) == E, 'precedence: explicit + detected -> explicit')
+  ok(config.effective_scope_value(E, nil, nil) == E, 'precedence: explicit only -> explicit')
+  ok(config.effective_scope_value(nil, O, D) == O, 'precedence: override + detected -> override')
+  ok(config.effective_scope_value(nil, O, nil) == O, 'precedence: override only -> override')
+  ok(config.effective_scope_value(nil, nil, D) == D, 'precedence: detected only -> detected')
+  ok(config.effective_scope_value(nil, nil, nil) == nil, 'precedence: nothing set -> nil')
+end
+
+-- The :AdoPrSetScope argument parser is pure. `field=value` tokens; a value runs until the next
+-- recognised `field=` token, so a project name with spaces needs no quoting (Neovim's command
+-- line strips none anyway).
+do
+  local fields, err = config.parse_scope_args({ 'organization=https://dev.azure.com/Org', 'project=TSC', 'Cloud', 'Platform', 'repository=Repo' })
+  ok(err == nil, 'parse: multi-word value accepted', tostring(err))
+  ok(fields and fields.organization == 'https://dev.azure.com/Org', 'parse: organization')
+  ok(fields and fields.project == 'TSC Cloud Platform', 'parse: project keeps its spaces')
+  ok(fields and fields.repository == 'Repo', 'parse: repository')
+
+  local partial = config.parse_scope_args({ 'project=Only This' })
+  ok(partial and partial.project == 'Only This' and partial.organization == nil, 'parse: only the fields given are returned')
+
+  local none, nerr = config.parse_scope_args({})
+  ok(none == nil and nerr ~= nil, 'parse: no arguments is an error')
+  local bad, berr = config.parse_scope_args({ 'wat=1' })
+  ok(bad == nil and berr ~= nil, 'parse: unknown field is an error', tostring(berr))
+  local loose, lerr = config.parse_scope_args({ 'MyRepo' })
+  ok(loose == nil and lerr ~= nil, 'parse: a value with no leading field= is an error')
+  local blank, blerr = config.parse_scope_args({ 'project=' })
+  ok(blank == nil and blerr ~= nil, 'parse: an empty value is an error')
+end
+
 local scratch_root = os.getenv('TEMP') and (os.getenv('TEMP') .. '/ado-pr-config-resolve-spec') or '/tmp/ado-pr-config-resolve-spec'
 local function scratch_cwd(name)
   local dir = scratch_root .. '/' .. name
@@ -115,6 +153,37 @@ do
   ok(git_remote_calls == 1, 'cache: one `git remote -v` shell-out for the whole triple', tostring(git_remote_calls))
   local org2 = config.resolve_organization()
   ok(org1 == org2 and git_remote_calls == 1, 'cache: a second resolve for an already-detected cwd reuses the cache')
+end
+
+-- Session override (:AdoPrSetScope). Kept LAST in this file deliberately: unlike the detection
+-- cache it is session-global with no cwd escape hatch, so setting it earlier would leak into
+-- every later detection case.
+do
+  vim.fn.chdir(scratch_cwd('override'))
+  config.setup({})
+  vim.system = function(cmd, _opts)
+    error('vim.system should not run when a session override covers every field: ' .. vim.inspect(cmd))
+  end
+  config.set_session_scope({ organization = 'https://dev.azure.com/OverrideOrg', project = 'Override Project', repository = 'OverrideRepo' })
+  local org, oerr = config.resolve_organization()
+  local project, perr = config.resolve_project()
+  local repo, rerr = config.resolve_repository()
+  ok(org == 'https://dev.azure.com/OverrideOrg' and oerr == nil, 'override: organization beats detection', tostring(oerr))
+  ok(project == 'Override Project' and perr == nil, 'override: project beats detection')
+  ok(repo == 'OverrideRepo' and rerr == nil, 'override: repository beats detection')
+
+  -- A later call updates only the fields it names -- the rest of the override stands.
+  config.set_session_scope({ repository = 'SecondRepo' })
+  ok(config.resolve_repository() == 'SecondRepo', 'override: a later call replaces that field')
+  ok(config.resolve_project() == 'Override Project', 'override: fields not named by a later call are kept')
+
+  -- An explicit setup() value for a field is never overridden by the session command.
+  config.setup({ project = 'Explicit Project' })
+  ok(config.resolve_project() == 'Explicit Project', 'override: explicit setup() project still wins')
+  ok(config.resolve_repository() == 'SecondRepo', 'override: unset setup() fields still come from the override')
+
+  -- The override is in memory only -- it never reaches the setup() config table.
+  ok(config.get().repository == nil, 'override: not written into the setup() config table')
 end
 
 vim.system = real_system

@@ -28,6 +28,13 @@ vim.api.nvim_create_user_command('AdoPrIterations', function()
   require('ado-pr').browse_iterations()
 end, { desc = 'ado-pr: browse the active PR iterations, one push at a time' })
 
+vim.api.nvim_create_user_command('AdoPrSetScope', function(o)
+  require('ado-pr').set_scope(o.fargs)
+end, {
+  nargs = '+',
+  desc = 'ado-pr: AdoPrSetScope organization=<url> project=<name> repository=<name> — session-only override of the auto-detected ADO scope',
+})
+
 vim.api.nvim_create_user_command('AdoPrSetDiffBase', function(o)
   require('ado-pr').set_diff_base(o.args)
 end, { nargs = 1, desc = 'ado-pr: set a session-only diff-base override for the Full-PR view' })
