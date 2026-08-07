@@ -29,11 +29,19 @@ Auth reuses `az login`. **No PAT or secret is stored by this plugin.**
 
 ## Setup
 
+`organization`/`project`/`repository` are optional — when unset, they're auto-detected from
+the current repo's ADO git remote (`origin` first, falling back to the repo's other remotes;
+a zero- or multiple-match repo fails loud with a `vim.notify` ERROR rather than guessing). Set
+any of the three explicitly to skip detection for that field, e.g. when the remote doesn't
+reflect where PRs actually live:
+
 ```lua
 require('ado-pr').setup({
-  organization = 'https://dev.azure.com/YourOrg',
-  project = 'Your Project',
-  repository = 'Your.Repo',
+  -- organization/project/repository: omit to auto-detect from the git remote, or set
+  -- explicitly to override detection --
+  -- organization = 'https://dev.azure.com/YourOrg',
+  -- project = 'Your Project',
+  -- repository = 'Your.Repo',
   keymaps = {
     toggle_thread_pane = '<F8>', -- buffer-local to the diff, single-key by default
     next_thread = ']t',
@@ -65,7 +73,8 @@ and fails if the PR's branch already has a worktree. See the review-worktree wor
 ```
 lua/ado-pr/
   init.lua     setup() + lazy accessors
-  config.lua   user config (org/project/repo)
+  config.lua   user config (org/project/repo, explicit or auto-detected)
+  remote.lua   git remote URL -> org/project/repo (pure parse + detection order; adapter reads `git remote -v`)
   az.lua       az CLI + `az devops invoke` glue (reads, checkout, vote, post thread)
   anchor.lua   diffview cursor → (filePath, line, side) ADO thread anchor (pure + adapter)
   threads.lua  filter + read-resolve ADO PR comment threads (pure: no Neovim API, no network)
