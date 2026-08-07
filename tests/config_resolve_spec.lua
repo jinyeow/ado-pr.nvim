@@ -288,7 +288,16 @@ do
   local shown = last_notify().msg or ''
   ok(shown:match('project = Shown Project %(override%)'), 'show: the resolvable field is still reported', shown)
   ok(shown:match('organization = unresolved'), 'show: an undetectable field reports why', shown)
+
   config.reset_scope({})
+  -- A bare reset-all with nothing left overridden reports the no-op too.
+  notifications = {}
+  config.reset_scope({})
+  ok(
+    (last_notify().msg or ''):match('no active session scope override'),
+    'reset: reset-all with nothing overridden says nothing was cleared',
+    last_notify().msg
+  )
 end
 
 vim.system = real_system
