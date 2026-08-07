@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-07
+
+### Features
+- Browse PR iterations (#47) ([3f964a6](https://github.com/jinyeow/ado-pr.nvim/commit/3f964a6a95688a2ecd5b2626d9c0bdee6b7923a5))
+- Thread cycle/pick under cursor (#48) ([994cdcc](https://github.com/jinyeow/ado-pr.nvim/commit/994cdcccbcf19efa53a2a0a8a2adb1779d835d2b))
+- Diff-base override commands (#52) (#55) ([293d6bd](https://github.com/jinyeow/ado-pr.nvim/commit/293d6bd974bb4e10b8b0afd099e05287bd82aa54))
+- Block left-side comments while a diff-base override is active (#54) (#57) ([b7815bc](https://github.com/jinyeow/ado-pr.nvim/commit/b7815bcb6d2085a33bff7195772f7f537bd90503))
+
+
+### Testing
+- Cover diff-base override / iteration-browsing interaction (#56) ([4064075](https://github.com/jinyeow/ado-pr.nvim/commit/406407567c51f8b2d933f0e00c45796692d36e3f))
+
+
 ## [0.1.0] - 2026-08-06
 
 ### Bug Fixes
@@ -24,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pair replacement-hunk lines instead of marking them unshowable (#37) ([20129aa](https://github.com/jinyeow/ado-pr.nvim/commit/20129aa916117ef46ca35763cd4e0d5e37483034))
 - Re-notify not-showable thread count on refresh, not just on open (#38) ([fdb0f53](https://github.com/jinyeow/ado-pr.nvim/commit/fdb0f531e4c9972931217bc9e989996eee5f8b98))
 - Compare clamped landing row, not stale line_start, in jump (#44) ([d563a21](https://github.com/jinyeow/ado-pr.nvim/commit/d563a213d564bca12296e41a8ac80bb73093af42))
+- Use literal substring match instead of awk regex for changelog extraction ([2785fca](https://github.com/jinyeow/ado-pr.nvim/commit/2785fca7d82991abd519f051ea81d77ec79088d2))
 
 
 ### CI
