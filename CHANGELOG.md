@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-07
+
+### Bug Fixes
+- Base iteration 1 on commonRefCommit (#49) (#58) ([6059f3d](https://github.com/jinyeow/ado-pr.nvim/commit/6059f3d4a3a2bb51f2bc4789b6a0c9e9bc420d58))
+
+
+### Features
+- Auto-detect ADO org/project/repo from git remote (#59) ([976a14c](https://github.com/jinyeow/ado-pr.nvim/commit/976a14c303a158bb3770a75d5760c062a4c35e29))
+- Session-only override for detected ADO scope (#60) ([171ec54](https://github.com/jinyeow/ado-pr.nvim/commit/171ec540cac494e05f037eea4a1b50e04dcadba5))
+
+
 ## [0.2.0] - 2026-08-07
 
 ### Features
