@@ -74,20 +74,20 @@ end
 
 -- parse_url: a URL-encoded repository name is decoded, same as project.
 do
-  local _org, _project, repo = remote.parse_url('https://dev.azure.com/myorg/MyProject/_git/My%20Repo')
+  local _, _, repo = remote.parse_url('https://dev.azure.com/myorg/MyProject/_git/My%20Repo')
   eq(repo, 'My Repo', 'encoded repository: decoded')
 end
 
 -- parse_url: trailing `.git` stripped from the repository.
 do
-  local org, project, repo = remote.parse_url('https://dev.azure.com/myorg/MyProject/_git/MyRepo.git')
+  local org, _, repo = remote.parse_url('https://dev.azure.com/myorg/MyProject/_git/MyRepo.git')
   eq(org, 'https://dev.azure.com/myorg', 'trailing .git: organization')
   eq(repo, 'MyRepo', 'trailing .git: repository has .git stripped')
 end
 
 -- parse_url: non-ADO / malformed URLs return nil + a reason.
 do
-  local org, _project, _repo, reason
+  local org, reason
   org, reason = remote.parse_url('git@github.com:jinyeow/ado-pr.nvim.git')
   ok(org == nil and reason ~= nil, 'github remote: no match', tostring(reason))
 

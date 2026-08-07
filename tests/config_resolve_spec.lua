@@ -110,8 +110,8 @@ do
     }
   end
   local org1 = config.resolve_organization()
-  local project1 = config.resolve_project()
-  local repo1 = config.resolve_repository()
+  config.resolve_project()
+  config.resolve_repository()
   ok(git_remote_calls == 1, 'cache: one `git remote -v` shell-out for the whole triple', tostring(git_remote_calls))
   local org2 = config.resolve_organization()
   ok(org1 == org2 and git_remote_calls == 1, 'cache: a second resolve for an already-detected cwd reuses the cache')
