@@ -123,8 +123,11 @@ end
 -- between source and target branches, and "iteration 1" is the head of the source branch at
 -- PR creation (confirmed via Microsoft's PR iteration model docs) -- so iteration 1's base
 -- is iteration 0, not itself. Iteration 0 is never returned by `az.list_iterations` (it
--- starts numbering at 1), so that base falls back to iteration 1's own targetRefCommit (the
--- target branch tip it was compared against) instead of an `by_id` lookup. Returns
+-- starts numbering at 1), so that base comes from iteration 1's own commonRefCommit (ADO's
+-- recorded merge-base at that push) instead of an `by_id` lookup, falling back to its
+-- targetRefCommit only when the API omits it. The fallback is back-compat, not a peer:
+-- targetRefCommit is the target branch tip AT PUSH TIME, so once the target branch moves
+-- (merge/rebase/force-push) it drags unrelated upstream changes into the diff. Returns
 -- ({ window = { iteration, base_iteration }, base_commit, head_commit }|nil, err|nil).
 function M.window_for(iterations, id)
   local by_id = {}
@@ -142,7 +145,8 @@ function M.window_for(iterations, id)
   local base_id = id > 1 and (id - 1) or 0
   local base_commit
   if id == 1 then
-    base_commit = selected.targetRefCommit and selected.targetRefCommit.commitId
+    local common = selected.commonRefCommit and selected.commonRefCommit.commitId
+    base_commit = common or (selected.targetRefCommit and selected.targetRefCommit.commitId)
   else
     local base_iter = by_id[base_id]
     base_commit = base_iter and base_iter.sourceRefCommit and base_iter.sourceRefCommit.commitId
