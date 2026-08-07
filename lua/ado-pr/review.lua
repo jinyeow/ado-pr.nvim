@@ -477,6 +477,18 @@ function M.comment(text)
     vim.notify('ado-pr: ' .. err, vim.log.levels.ERROR)
     return
   end
+  -- Left-side line numbers come from the overridden base commit's content, not the
+  -- target-based diff ADO computes, so a left-side thread could anchor to the wrong line in
+  -- ADO's UI. The right side is always the checked-out worktree (HEAD), independent of the
+  -- diff base, so it stays postable. Deleted files are left-side only (anchor.lua) and so
+  -- become uncommentable while an override is active -- fail-closed on purpose, no exception.
+  if ctx.override_base and a.side == 'left' then
+    vim.notify(
+      'ado-pr: cannot comment on the left (old) side while a diff-base override is active -- reset it first (:AdoPrResetDiffBase)',
+      vim.log.levels.ERROR
+    )
+    return
+  end
   local function post(content)
     if not content or content == '' then
       return

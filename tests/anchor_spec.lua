@@ -127,6 +127,22 @@ do
   ok(a == nil and err ~= nil, 'deleted file right side: rejected', tostring(err))
 end
 
+-- Left side of a DELETED file resolves normally — a deleted file is left-side ONLY, which
+-- is why an active diff-base override makes it entirely uncommentable (issue #54).
+do
+  local a, err = anchor.resolve({
+    path = 'src/deleted.lua',
+    oldpath = nil,
+    status = 'D',
+    winid_a = 1000,
+    winid_b = 1001,
+    cur_win = 1000,
+    cur_line = 4,
+  })
+  ok(a and not err, 'deleted left: no error', err)
+  eq(a, { filePath = '/src/deleted.lua', line = 4, side = 'left' }, 'deleted file left side: side is left')
+end
+
 -- A "null" path sentinel (diffview's deleted-side marker) is an error.
 do
   local a, err = anchor.resolve({

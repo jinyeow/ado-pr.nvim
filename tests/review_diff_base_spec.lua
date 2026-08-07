@@ -45,6 +45,16 @@ package.loaded['fzf-lua'] = {
   end,
 }
 
+-- M.comment's only diffview dependency: which pane the cursor sits in. Stubbed so the
+-- comment blocks below can drive the resolved side directly -- `anchor.resolve`'s own
+-- side/status logic is covered in tests/anchor_spec.lua, not re-tested here.
+local anchor_side
+package.loaded['ado-pr.anchor'] = {
+  current = function()
+    return { filePath = '/src/foo.lua', line = 9, side = anchor_side }
+  end,
+}
+
 local review = require('ado-pr.review')
 local state = require('ado-pr.state')
 
@@ -65,7 +75,7 @@ local iterations = {
   { id = 3, sourceRefCommit = { commitId = 'c3' }, targetRefCommit = { commitId = 'base0' } },
 }
 
-local calls
+local calls, post_calls
 local checkout_result, show_result, fetch_result, revparse_result, threads_result
 local override_fetch_result
 
@@ -117,6 +127,15 @@ local function stub_system()
           return show_result
         end,
       }
+    elseif vim.tbl_contains(cmd, 'pullRequestThreads') and vim.tbl_contains(cmd, 'POST') then
+      -- Ordered BEFORE the list branch below: az.post_thread and az.list_threads invoke the
+      -- same `pullRequestThreads` resource and differ only by --http-method.
+      table.insert(post_calls, { cmd = cmd })
+      return {
+        wait = function()
+          return { code = 0, stdout = vim.json.encode({ id = 999 }), stderr = '' }
+        end,
+      }
     elseif vim.tbl_contains(cmd, 'pullRequestThreads') then
       return {
         wait = function()
@@ -161,6 +180,8 @@ end
 
 local function reset()
   calls = {}
+  post_calls = {}
+  anchor_side = 'right'
   signs_calls = {}
   view_calls = {}
   set_threads_calls = {}
@@ -606,6 +627,58 @@ do
   open_pr(2)
 
   ok(state.get().override_base == nil, 'AdoPrReview: fresh context has override_base unset, not carried over')
+end
+
+-- ---------------------------------------------------------------------------
+-- Commenting while an override is active: the left (old) side's line numbers come from the
+-- overridden base commit's content, not the target-based diff ADO renders, so a left-side
+-- thread could anchor to the wrong line in ADO's UI (issue #54). The right side is always
+-- the checked-out worktree (HEAD), independent of the diff base, so it stays postable.
+-- ---------------------------------------------------------------------------
+do
+  reset()
+  open_pr()
+  arm_override_revparse()
+  review.set_diff_base('release/1.2')
+  notifications, post_calls = {}, {}
+  anchor_side = 'left'
+
+  ok(state.get().window == nil, 'precondition: not browsing an iteration window')
+  review.comment('should not post')
+
+  ok(has_level(vim.log.levels.ERROR), 'comment left + override: refused with an ERROR', vim.inspect(notifications))
+  ok(#post_calls == 0, 'comment left + override: no thread posted')
+  -- A deleted file is left-side only (anchor.resolve rejects its right side, and yields
+  -- side = 'left' from the left pane -- tests/anchor_spec.lua), so it takes this same
+  -- rejection path with no special case of its own.
+end
+
+do
+  reset()
+  open_pr()
+  arm_override_revparse()
+  review.set_diff_base('release/1.2')
+  notifications, post_calls = {}, {}
+  anchor_side = 'right'
+
+  review.comment('ship it')
+
+  ok(#post_calls == 1, 'comment right + override: thread still posted', #post_calls)
+  ok(not has_level(vim.log.levels.ERROR), 'comment right + override: no ERROR', vim.inspect(notifications))
+end
+
+-- The discriminating case: the left side is only blocked BECAUSE an override is active.
+do
+  reset()
+  open_pr()
+  notifications, post_calls = {}, {}
+  anchor_side = 'left'
+
+  ok(state.get().override_base == nil, 'precondition: no override active')
+  review.comment('nit')
+
+  ok(#post_calls == 1, 'comment left + no override: thread posted normally', #post_calls)
+  ok(not has_level(vim.log.levels.ERROR), 'comment left + no override: no ERROR', vim.inspect(notifications))
 end
 
 vim.system = real_system
