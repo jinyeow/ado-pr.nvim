@@ -35,6 +35,17 @@ end, {
   desc = 'ado-pr: AdoPrSetScope organization=<url> project=<name> repository=<name> — session-only override of the auto-detected ADO scope',
 })
 
+vim.api.nvim_create_user_command('AdoPrShowScope', function()
+  require('ado-pr').show_scope()
+end, { desc = 'ado-pr: show the effective organization/project/repository and where each came from' })
+
+vim.api.nvim_create_user_command('AdoPrResetScope', function(o)
+  require('ado-pr').reset_scope(o.fargs)
+end, {
+  nargs = '*',
+  desc = 'ado-pr: AdoPrResetScope [organization] [project] [repository] — clear the session scope override (all fields when given none)',
+})
+
 vim.api.nvim_create_user_command('AdoPrSetDiffBase', function(o)
   require('ado-pr').set_diff_base(o.args)
 end, { nargs = 1, desc = 'ado-pr: set a session-only diff-base override for the Full-PR view' })
