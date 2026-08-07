@@ -27,3 +27,15 @@ end, { nargs = '*', desc = 'ado-pr: comment on the diff line under the cursor (i
 vim.api.nvim_create_user_command('AdoPrIterations', function()
   require('ado-pr').browse_iterations()
 end, { desc = 'ado-pr: browse the active PR iterations, one push at a time' })
+
+vim.api.nvim_create_user_command('AdoPrSetDiffBase', function(o)
+  require('ado-pr').set_diff_base(o.args)
+end, { nargs = 1, desc = 'ado-pr: set a session-only diff-base override for the Full-PR view' })
+
+vim.api.nvim_create_user_command('AdoPrShowDiffBase', function()
+  require('ado-pr').show_diff_base()
+end, { desc = 'ado-pr: show the currently effective diff base' })
+
+vim.api.nvim_create_user_command('AdoPrResetDiffBase', function()
+  require('ado-pr').reset_diff_base()
+end, { desc = 'ado-pr: clear the diff-base override, returning to the ADO-resolved target' })

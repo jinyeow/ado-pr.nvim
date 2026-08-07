@@ -160,25 +160,32 @@ local function fetch_target_ref(target_ref, cwd)
   return fetch
 end
 
--- Fetch the PR's real target ref and resolve it to a commit, so the review
--- diffs against what ADO actually targeted (not a possibly-stale, possibly-
--- wrong local ref). Runs with the review worktree as cwd. Returns
--- (commit|nil, err|nil).
-local function resolve_base(pr, cwd)
-  local target_ref = pr.targetRefName
-  if not target_ref or target_ref == '' then
-    return nil, 'PR payload missing targetRefName'
-  end
-  local fetch = fetch_target_ref(target_ref, cwd)
+-- Fetch `ref` (retrying via fetch_target_ref) and resolve it to a commit. Shared by
+-- resolve_base (the PR's real ADO target) and M.set_diff_base (an arbitrary user-given
+-- ref), so the retry-then-abort pattern lives in one place. Runs with the review worktree
+-- as cwd. Returns (commit|nil, err|nil).
+local function resolve_ref(ref, cwd)
+  local fetch = fetch_target_ref(ref, cwd)
   if fetch.code ~= 0 then
     local detail = fetch.stderr ~= '' and fetch.stderr or ('exit ' .. fetch.code)
-    return nil, 'git fetch ' .. target_ref .. ' failed after ' .. FETCH_RETRIES .. ' attempts: ' .. detail
+    return nil, 'git fetch ' .. ref .. ' failed after ' .. FETCH_RETRIES .. ' attempts: ' .. detail
   end
   local revparse = vim.system({ 'git', 'rev-parse', 'FETCH_HEAD' }, { text = true, cwd = cwd }):wait()
   if revparse.code ~= 0 then
     return nil, 'git rev-parse FETCH_HEAD failed: ' .. (revparse.stderr ~= '' and revparse.stderr or ('exit ' .. revparse.code))
   end
   return vim.trim(revparse.stdout or ''), nil
+end
+
+-- Fetch the PR's real target ref and resolve it to a commit, so the review
+-- diffs against what ADO actually targeted (not a possibly-stale, possibly-
+-- wrong local ref). Returns (commit|nil, err|nil).
+local function resolve_base(pr, cwd)
+  local target_ref = pr.targetRefName
+  if not target_ref or target_ref == '' then
+    return nil, 'PR payload missing targetRefName'
+  end
+  return resolve_ref(target_ref, cwd)
 end
 
 function M.open(id)
@@ -337,24 +344,84 @@ function M.select_iteration(iterations, id)
   view.attach()
 end
 
--- Return to the full-PR view: the plain thread list and the diff base...HEAD review.open
--- originally opened. A no-op when already there.
-function M.reset_window()
+-- (Re)open the full-PR view: the plain thread list and the diff against the effective base
+-- (state.effective_base() -- the active :AdoPrSetDiffBase override, or pr_base if none) and
+-- HEAD. Unconditional -- fires even when already in the full-PR view, since setting or
+-- clearing an override is the common case of needing a fresh render while already there,
+-- not a genuine no-op the way "already browsing this exact iteration" would be. Shared by
+-- M.reset_window (the iteration-window-reset call site), M.set_diff_base and
+-- M.reset_diff_base.
+local function reopen_full_view()
   local ctx = state.get()
   if not (ctx and ctx.pr_base) then
     vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
     return
   end
-  if not ctx.window then
+  if not ensure_diffview() then
+    return
+  end
+  local base = state.effective_base()
+  open_diff_range(base, 'HEAD')
+  set_diff({ base = base, head = nil, window = nil })
+  wire_threads(state.get(), nil)
+  view.attach()
+end
+
+-- Return to the full-PR view from browsing an iteration.
+function M.reset_window()
+  reopen_full_view()
+end
+
+-- Validate/resolve `ref` to a commit (same retry-then-abort pattern as resolve_base) and
+-- set it as the session-only diff-base override for the Full-PR view (docs/specs/
+-- diff-base-override.md). On success, exits any active iteration window and reopens the
+-- full-PR view against the new override. On failure, state and the active diff are left
+-- untouched.
+function M.set_diff_base(ref)
+  local ctx = state.get()
+  if not (ctx and ctx.repo_root) then
+    vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
     return
   end
   if not ensure_diffview() then
     return
   end
-  open_diff_range(ctx.pr_base, 'HEAD')
-  set_diff({ base = ctx.pr_base, head = nil, window = nil })
-  wire_threads(state.get(), nil)
-  view.attach()
+  local commit, err = resolve_ref(ref, ctx.repo_root)
+  if not commit then
+    vim.notify('ado-pr: ' .. err, vim.log.levels.ERROR)
+    return
+  end
+  ctx.override_base = commit
+  state.set(ctx)
+  reopen_full_view()
+end
+
+-- Report the currently effective Full-PR-view diff base, and whether it's an active
+-- :AdoPrSetDiffBase override or the ADO-resolved default.
+function M.show_diff_base()
+  local ctx = state.get()
+  if not (ctx and ctx.pr_base) then
+    vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
+    return
+  end
+  local base = state.effective_base()
+  local origin = ctx.override_base and 'override' or 'ADO-resolved default'
+  vim.notify(('ado-pr: diff base %s (%s)'):format(base, origin), vim.log.levels.INFO)
+end
+
+-- Clear the active diff-base override and reopen the full-PR view against pr_base.
+function M.reset_diff_base()
+  local ctx = state.get()
+  if not (ctx and ctx.pr_base) then
+    vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
+    return
+  end
+  if not ensure_diffview() then
+    return
+  end
+  ctx.override_base = nil
+  state.set(ctx)
+  reopen_full_view()
 end
 
 -- Post an inline comment thread on the line under the cursor in the diff.

@@ -416,7 +416,9 @@ do
   ok(state.get().head == nil, 'reset_window: state.head cleared (defaults back to HEAD)')
 end
 
--- reset_window on the already-full view is a no-op (nothing to restore).
+-- reset_window on the already-full view still reopens (unconditional per docs/specs/
+-- diff-base-override.md -- setting/resetting a diff-base override is the common case of
+-- needing a fresh render while already in the full-PR view, so this is not a no-op).
 do
   reset()
   open_pr()
@@ -424,8 +426,14 @@ do
 
   review.reset_window()
 
-  ok(#cmd_calls() == 0, 'reset_window: no-op when already on the full view')
-  ok(#set_threads_calls == 0, 'reset_window: no-op does not re-fetch')
+  local diff_open_idx
+  for _, c in ipairs(cmd_calls()) do
+    if c.cmd == 'DiffviewOpen deadbeef...HEAD' then
+      diff_open_idx = true
+    end
+  end
+  ok(diff_open_idx, 'reset_window: reopens even when already on the full view', vim.inspect(cmd_calls()))
+  ok(#set_threads_calls == 1, 'reset_window: re-fetches threads even when already on the full view')
 end
 
 -- Commenting while browsing an iteration window is refused -- the right-side lines in a
