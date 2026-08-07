@@ -38,6 +38,13 @@ package.loaded['ado-pr.view'] = {
   end,
 }
 
+local fzf_exec_calls
+package.loaded['fzf-lua'] = {
+  fzf_exec = function(lines, opts)
+    table.insert(fzf_exec_calls, { lines = lines, opts = opts })
+  end,
+}
+
 local review = require('ado-pr.review')
 local state = require('ado-pr.state')
 
@@ -157,6 +164,7 @@ local function reset()
   signs_calls = {}
   view_calls = {}
   set_threads_calls = {}
+  fzf_exec_calls = {}
   stub_system()
   stub_cmd()
   stub_notify()
@@ -539,6 +547,49 @@ do
     end
   end
   ok(diff_open, 'select_iteration: unaffected by an active override', vim.inspect(cmd_calls()))
+  -- Not a restatement of the DiffviewOpen assertion above: signs.lua diffs state.range()
+  -- (base...head) itself, so the committed commit pair is its own claim -- the override must
+  -- not leak into it either.
+  eq(state.get().base, 'c2', 'select_iteration: state.base is the windows own base, not the override')
+  eq(state.get().head, 'c3', 'select_iteration: state.head is the windows own head under an active override')
+  -- The override survives the iteration window rather than being cleared by it -- returning to
+  -- the Full-PR view picking the override back up (the block below) depends on this.
+  eq(state.get().override_base, 'cafef00d', 'select_iteration: override_base survives an iteration window')
+end
+
+-- Returning to "Full PR (all iterations)" from the :AdoPrIterations picker reopens against the
+-- effective base -- the override when one is active, not pr_base. Driven through
+-- browse_iterations' own picker callback (the AC's wording), not review.reset_window directly,
+-- the same way tests/review_iterations_spec.lua drives its stale-selection case.
+do
+  reset()
+  open_pr()
+  arm_override_revparse()
+  review.set_diff_base('release/1.2')
+  review.select_iteration(iterations, 3)
+  ok(state.get().window ~= nil, 'precondition: browsing an iteration window with an override active')
+
+  review.browse_iterations()
+  ok(#fzf_exec_calls == 1, 'browse_iterations: opens the fzf picker')
+  local full_view_line = fzf_exec_calls[1].lines[1]
+  local default_action = fzf_exec_calls[1].opts.actions['default']
+  calls, signs_calls, view_calls, set_threads_calls, notifications = {}, {}, {}, {}, {}
+
+  default_action({ full_view_line })
+  vim.wait(10) -- the picker callback is vim.schedule'd
+
+  local diff_open
+  for _, c in ipairs(cmd_calls()) do
+    if c.cmd == 'DiffviewOpen cafef00d...HEAD' then
+      diff_open = true
+    end
+  end
+  ok(diff_open, 'full-view row: reopens against the override, not pr_base', vim.inspect(cmd_calls()))
+  ok(state.get().window == nil, 'full-view row: window cleared')
+  eq(state.get().base, 'cafef00d', 'full-view row: state.base is the effective base')
+  ok(state.get().head == nil, 'full-view row: head cleared (defaults back to HEAD)')
+  eq(state.get().override_base, 'cafef00d', 'full-view row: override_base still active')
+  ok(set_threads_calls[1] and set_threads_calls[1].window == nil, 'full-view row: plain-view threads reloaded')
 end
 
 -- ---------------------------------------------------------------------------
