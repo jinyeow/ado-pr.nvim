@@ -87,14 +87,32 @@ local function ensure_commit(cwd, sha, label)
   return true
 end
 
--- Close the previous diff view, if this session has one open, before opening a new commit
--- range -- diffview opens every view in its own new tabpage (view.lua's own comment), so
--- without this a window switch would pile up a second tab/session on top of the first
--- instead of replacing it. Only ever called after a successful diffview-backed M.open, so
--- a view is always there to close.
+-- Open a new commit range and only then close the view this session already had open --
+-- diffview opens every view in its own new tabpage (view.lua's own comment), so without
+-- closing the old one a window switch would pile up a second tab/session on top of the
+-- first instead of replacing it. The close comes AFTER the open, not before: DiffviewOpen
+-- can fail operationally even with diffview.nvim installed, and closing first would leave
+-- the user with no diff at all on such a failure. Raises on a failed open, leaving the old
+-- view untouched -- callers pcall this and report the failure (see reopen_full_view).
+--
+-- The old view is closed by running DiffviewClose in its own tabpage, captured before the
+-- open, rather than by closing that tabpage outright: if the user had wandered off the
+-- diff to an unrelated tab, DiffviewClose there simply finds no view and closes nothing,
+-- where a blind tabpage close would destroy their window. Only ever called after a
+-- successful diffview-backed M.open, so a previous tabpage always exists; the validity and
+-- distinctness checks cover only diffview declining to open its own new tabpage.
 local function open_diff_range(base_commit, head_commit)
-  pcall(vim.cmd, 'DiffviewClose')
+  local previous_tab = vim.api.nvim_get_current_tabpage()
   vim.cmd(('DiffviewOpen %s...%s'):format(base_commit, head_commit))
+  local new_tab = vim.api.nvim_get_current_tabpage()
+  if new_tab == previous_tab or not vim.api.nvim_tabpage_is_valid(previous_tab) then
+    return
+  end
+  vim.api.nvim_set_current_tabpage(previous_tab)
+  pcall(vim.cmd, 'DiffviewClose')
+  if vim.api.nvim_tabpage_is_valid(new_tab) then
+    vim.api.nvim_set_current_tabpage(new_tab)
+  end
 end
 
 -- Pure: iteration id -> the { iteration, base_iteration } window plus the commit pair to
