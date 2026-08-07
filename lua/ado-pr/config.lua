@@ -71,6 +71,9 @@ function M.parse_scope_args(fargs)
   for _, token in ipairs(fargs or {}) do
     local key, value = token:match('^([%a_]+)=(.*)$')
     if key and SCOPE_FIELDS[key] then
+      if fields[key] then
+        return nil, ('%s was given twice'):format(key)
+      end
       field = key
       fields[field] = value
     elseif field then
@@ -160,10 +163,20 @@ function M.reset_scope(fargs)
       return
     end
   end
+  -- Only the fields that actually carried an override are named, so a reset that changed
+  -- nothing never reads as if it had.
+  local cleared = {}
   for _, field in ipairs(fields) do
+    if session_override[field] then
+      table.insert(cleared, field)
+    end
     session_override[field] = nil
   end
-  vim.notify('ado-pr: session scope override cleared — ' .. table.concat(fields, ', '), vim.log.levels.INFO)
+  if #cleared == 0 then
+    vim.notify('ado-pr: no active session scope override to clear', vim.log.levels.INFO)
+    return
+  end
+  vim.notify('ado-pr: session scope override cleared — ' .. table.concat(cleared, ', '), vim.log.levels.INFO)
 end
 
 -- Resolve one scope field: an explicit setup() value or a session override is used as-is (no

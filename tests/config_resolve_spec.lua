@@ -57,6 +57,8 @@ do
   ok(loose == nil and lerr ~= nil, 'parse: a value with no leading field= is an error')
   local blank, blerr = config.parse_scope_args({ 'project=' })
   ok(blank == nil and blerr ~= nil, 'parse: an empty value is an error')
+  local dup, derr = config.parse_scope_args({ 'project=A', 'project=B' })
+  ok(dup == nil and derr ~= nil, 'parse: the same field given twice is an error', vim.inspect(dup))
 
   -- A token that merely looks like `field=value` but names no recognised field is part of the
   -- value being accumulated, not a new marker -- values run until the next RECOGNISED field=.
@@ -252,13 +254,25 @@ do
   ok(config.resolve_organization() == 'https://dev.azure.com/DetectedOrg', 'reset: the named field falls back to detection')
   ok(config.resolve_repository() == 'OnlyRepo', 'reset: fields not named are kept')
 
+  -- Resetting a field that carries no override is a no-op, and says so rather than claiming
+  -- to have cleared something.
+  notifications = {}
+  config.reset_scope({ 'organization' })
+  ok(last_notify().level == vim.log.levels.INFO, 'reset: a no-op reset still notifies at INFO', vim.inspect(last_notify()))
+  ok((last_notify().msg or ''):match('no active session scope override'), 'reset: a no-op reset says nothing was cleared', last_notify().msg)
+
   notifications = {}
   config.reset_scope({ 'nope' })
   ok(last_notify().level == vim.log.levels.ERROR, 'reset: an unknown field notifies an ERROR')
   ok(config.resolve_repository() == 'OnlyRepo', 'reset: an invalid call leaves the override untouched')
 
-  -- No arguments clears all three.
+  -- No arguments clears all three, but only the fields that actually had an override are
+  -- named in the notification.
+  notifications = {}
   config.reset_scope({})
+  local reset_msg = last_notify().msg or ''
+  ok(reset_msg:match('cleared') and reset_msg:match('repository'), 'reset: the cleared field is named', reset_msg)
+  ok(not reset_msg:match('organization'), 'reset: a field with no override is not reported as cleared', reset_msg)
   ok(config.resolve_repository() == 'DetectedRepo', 'reset: no arguments clears every field')
 end
 
