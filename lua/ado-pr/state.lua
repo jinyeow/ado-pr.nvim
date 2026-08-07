@@ -36,9 +36,10 @@ local M = {}
 ---                            :AdoPrSetDiffBase, or nil when none is active. `pr_base`
 ---                            itself is never touched by this -- always the true
 ---                            ADO-resolved base. The effective Full-PR-view base is
----                            `override_base or pr_base` (M.effective_base()), computed
----                            once so review.lua's reopen path and :AdoPrShowDiffBase
----                            never independently drift on what "the current base" means.
+---                            `override_base or pr_base` -- M.effective_base() reports it
+---                            for :AdoPrShowDiffBase. review.lua's reopen path applies the
+---                            same formula to the CANDIDATE override it is switching to,
+---                            since it must know the base before it commits `override_base`.
 
 ---@type AdoPrContext|nil
 local current = nil

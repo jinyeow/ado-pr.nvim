@@ -127,10 +127,19 @@ local function stub_system()
   end
 end
 
+-- Substring of the ex-command the stub below should throw on, or nil for "none throws".
+-- Same mutable-slot idiom as `revparse_result`: set it in a do-block to simulate an
+-- operational Diffview failure (a DiffviewOpen that errors even though diffview.nvim IS
+-- installed), which is a different failure mode from the ensure_diffview() guard's.
+local cmd_error_on
+
 local real_cmd = vim.cmd
 local function stub_cmd()
   vim.cmd = function(c)
     table.insert(calls, { kind = 'cmd', cmd = c })
+    if cmd_error_on and c:find(cmd_error_on, 1, true) then
+      error('Diffview: ' .. c .. ' failed')
+    end
   end
 end
 
@@ -164,6 +173,7 @@ local function reset()
   revparse_result = { code = 0, stdout = 'deadbeef\n', stderr = '' }
   threads_result = { code = 0, stdout = vim.json.encode({ count = 0, value = {} }), stderr = '' }
   override_fetch_result = { code = 0, stdout = '', stderr = '' }
+  cmd_error_on = nil
 end
 
 -- Arms `revparse_result` for the next rev-parse call (the override resolve that follows
@@ -420,6 +430,51 @@ do
     'reset_diff_base, diffview unavailable: notifies the same ERROR ensure_diffview() always produces',
     vim.inspect(notifications)
   )
+end
+
+-- ---------------------------------------------------------------------------
+-- DiffviewOpen itself throws: the override must not be committed to state while the
+-- visible diff never changed. Distinct from the ensure_diffview() blocks above --
+-- diffview.nvim IS installed here, the open just fails operationally (malformed revspec,
+-- an internal diffview error). The call under test is pcall'd because pre-fix the error
+-- propagates all the way out; post-fix it must be swallowed and reported (call_ok true).
+-- ---------------------------------------------------------------------------
+do
+  reset()
+  open_pr()
+  calls, signs_calls, view_calls, set_threads_calls, notifications = {}, {}, {}, {}, {}
+  arm_override_revparse()
+  cmd_error_on = 'DiffviewOpen'
+
+  local call_ok = pcall(review.set_diff_base, 'release/1.2')
+  cmd_error_on = nil
+
+  ok(call_ok, 'set_diff_base, DiffviewOpen throws: error is handled, not propagated to the caller')
+  ok(state.get().override_base == nil, 'set_diff_base, DiffviewOpen throws: override_base left unset')
+  eq(state.get().base, 'deadbeef', 'set_diff_base, DiffviewOpen throws: base left at the PR base')
+  ok(state.get().window == nil, 'set_diff_base, DiffviewOpen throws: window untouched')
+  ok(state.get().head == nil, 'set_diff_base, DiffviewOpen throws: head untouched')
+  ok(#set_threads_calls == 0, 'set_diff_base, DiffviewOpen throws: threads not reloaded')
+  ok(#view_calls == 0, 'set_diff_base, DiffviewOpen throws: follower pane not re-attached')
+  ok(has_level(vim.log.levels.ERROR), 'set_diff_base, DiffviewOpen throws: notifies ERROR', vim.inspect(notifications))
+end
+
+do
+  reset()
+  open_pr()
+  arm_override_revparse()
+  review.set_diff_base('release/1.2')
+  calls, signs_calls, view_calls, set_threads_calls, notifications = {}, {}, {}, {}, {}
+  cmd_error_on = 'DiffviewOpen'
+
+  local call_ok = pcall(review.reset_diff_base)
+  cmd_error_on = nil
+
+  ok(call_ok, 'reset_diff_base, DiffviewOpen throws: error is handled, not propagated to the caller')
+  eq(state.get().override_base, 'cafef00d', 'reset_diff_base, DiffviewOpen throws: override_base left in place')
+  eq(state.get().base, 'cafef00d', 'reset_diff_base, DiffviewOpen throws: base left at the override')
+  ok(#set_threads_calls == 0, 'reset_diff_base, DiffviewOpen throws: threads not reloaded')
+  ok(has_level(vim.log.levels.ERROR), 'reset_diff_base, DiffviewOpen throws: notifies ERROR', vim.inspect(notifications))
 end
 
 -- ---------------------------------------------------------------------------

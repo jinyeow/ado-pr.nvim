@@ -344,14 +344,21 @@ function M.select_iteration(iterations, id)
   view.attach()
 end
 
--- (Re)open the full-PR view: the plain thread list and the diff against the effective base
--- (state.effective_base() -- the active :AdoPrSetDiffBase override, or pr_base if none) and
--- HEAD. Unconditional -- fires even when already in the full-PR view, since setting or
--- clearing an override is the common case of needing a fresh render while already there,
--- not a genuine no-op the way "already browsing this exact iteration" would be. Shared by
--- M.reset_window (the iteration-window-reset call site), M.set_diff_base and
--- M.reset_diff_base.
-local function reopen_full_view()
+-- (Re)open the full-PR view: the plain thread list and the diff against `new_override_base`
+-- (nil for "no override", i.e. the PR's own pr_base) and HEAD. Unconditional -- fires even
+-- when already in the full-PR view, since setting or clearing an override is the common case
+-- of needing a fresh render while already there, not a genuine no-op the way "already
+-- browsing this exact iteration" would be. Shared by M.reset_window (the
+-- iteration-window-reset call site, which passes the override already in effect so its own
+-- behaviour is unchanged), M.set_diff_base and M.reset_diff_base.
+--
+-- The candidate override is a PARAMETER rather than something the callers commit to state
+-- first: DiffviewOpen can fail operationally even with diffview.nvim installed (a revspec
+-- edge case, an internal diffview error), and a caller that had already written
+-- `override_base` would leave state claiming a base the visible diff never moved to. Opening
+-- first and committing `override_base` together with base/head/window only on success keeps
+-- the whole switch atomic -- the same reason set_diff() exists as one assignment site.
+local function reopen_full_view(new_override_base)
   local ctx = state.get()
   if not (ctx and ctx.pr_base) then
     vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
@@ -360,8 +367,14 @@ local function reopen_full_view()
   if not ensure_diffview() then
     return
   end
-  local base = state.effective_base()
-  open_diff_range(base, 'HEAD')
+  local base = new_override_base or ctx.pr_base
+  local opened, err = pcall(open_diff_range, base, 'HEAD')
+  if not opened then
+    vim.notify(('ado-pr: could not open the diff against %s: %s'):format(base, tostring(err)), vim.log.levels.ERROR)
+    return
+  end
+  ctx.override_base = new_override_base
+  state.set(ctx)
   set_diff({ base = base, head = nil, window = nil })
   wire_threads(state.get(), nil)
   view.attach()
@@ -369,7 +382,8 @@ end
 
 -- Return to the full-PR view from browsing an iteration.
 function M.reset_window()
-  reopen_full_view()
+  local ctx = state.get()
+  reopen_full_view(ctx and ctx.override_base)
 end
 
 -- Validate/resolve `ref` to a commit (same retry-then-abort pattern as resolve_base) and
@@ -391,9 +405,7 @@ function M.set_diff_base(ref)
     vim.notify('ado-pr: ' .. err, vim.log.levels.ERROR)
     return
   end
-  ctx.override_base = commit
-  state.set(ctx)
-  reopen_full_view()
+  reopen_full_view(commit)
 end
 
 -- Report the currently effective Full-PR-view diff base, and whether it's an active
@@ -419,9 +431,7 @@ function M.reset_diff_base()
   if not ensure_diffview() then
     return
   end
-  ctx.override_base = nil
-  state.set(ctx)
-  reopen_full_view()
+  reopen_full_view(nil)
 end
 
 -- Post an inline comment thread on the line under the cursor in the diff.
