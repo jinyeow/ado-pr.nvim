@@ -52,6 +52,10 @@ require('ado-pr').setup({
 | `:AdoPrReview <id>` | Checkout PR `<id>` into the current worktree and open its diff |
 | `:AdoPrVote <id> <vote>` | `approve` / `approve-with-suggestions` / `wait-for-author` / `reject` / `reset` |
 | `:AdoPrComment` | Comment on the diff line under the cursor (right/left side from the focused pane) |
+| `:AdoPrIterations` | Browse the PR's iterations (one push at a time), or return to the full-PR view |
+| `:AdoPrSetDiffBase <ref>` | Override the Full-PR-view diff base to any git ref (branch/tag/SHA) — local visualization only, never touches the PR's real ADO target |
+| `:AdoPrShowDiffBase` | Show the currently effective diff base, and whether it's an override or the ADO-resolved default |
+| `:AdoPrResetDiffBase` | Clear the diff-base override, returning to the ADO-resolved target |
 
 Run these from a **dedicated detached `review` worktree** — `az repos pr checkout` needs a clean tree
 and fails if the PR's branch already has a worktree. See the review-worktree workflow.
@@ -92,7 +96,12 @@ tests/         headless assert specs (`nvim --headless -l tests/<name>_spec.lua`
    user-configurable via `keymaps`. Overlapping threads show the narrowest covering one with a
    visible count; `<F6>` cycles through every thread covering the line (wrapping), `<F7>` picks
    one directly (fzf-lua). Needs a live-PR smoke test.
-5. Iteration browsing, live refresh, reviewers, status checks.
+5. **[done] Iteration browsing** — `:AdoPrIterations` steps through the PR one push at a time
+   (diffed against the previous iteration's source commit), or back to the full-PR view.
+6. **[done] Diff-base override** — `:AdoPrSetDiffBase <ref>` / `:AdoPrShowDiffBase` /
+   `:AdoPrResetDiffBase`, a local-only override of what the full-PR diff is computed against
+   (any git ref), independent of iteration browsing.
+7. Live refresh, reviewers, status checks.
 
 The hard part is step 2/3: anchoring threads onto diffview buffers. Side is taken from the **focused
 diff pane** (right = new, left = old), and the path from diffview's `cur_entry` — the *displayed* diff
