@@ -477,6 +477,27 @@ do
   ok(has_level(vim.log.levels.ERROR), 'reset_diff_base, DiffviewOpen throws: notifies ERROR', vim.inspect(notifications))
 end
 
+-- select_iteration opens a diff range too, so it needs the same guard reopen_full_view
+-- has: an operational DiffviewOpen failure must not commit an iteration window whose diff
+-- never actually opened.
+do
+  reset()
+  open_pr()
+  calls, signs_calls, view_calls, set_threads_calls, notifications = {}, {}, {}, {}, {}
+  cmd_error_on = 'DiffviewOpen'
+
+  local call_ok = pcall(review.select_iteration, iterations, 3)
+  cmd_error_on = nil
+
+  ok(call_ok, 'select_iteration, DiffviewOpen throws: error is handled, not propagated to the caller')
+  ok(state.get().window == nil, 'select_iteration, DiffviewOpen throws: window left unset')
+  eq(state.get().base, 'deadbeef', 'select_iteration, DiffviewOpen throws: base left at the PR base')
+  ok(state.get().head == nil, 'select_iteration, DiffviewOpen throws: head left unset')
+  ok(#set_threads_calls == 0, 'select_iteration, DiffviewOpen throws: threads not reloaded')
+  ok(#view_calls == 0, 'select_iteration, DiffviewOpen throws: follower pane not re-attached')
+  ok(has_level(vim.log.levels.ERROR), 'select_iteration, DiffviewOpen throws: notifies ERROR', vim.inspect(notifications))
+end
+
 -- ---------------------------------------------------------------------------
 -- Setting an override while browsing an iteration window exits back to Full-PR view
 -- ---------------------------------------------------------------------------

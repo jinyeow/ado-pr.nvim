@@ -338,7 +338,15 @@ function M.select_iteration(iterations, id)
     vim.notify('ado-pr: ' .. head_err, vim.log.levels.ERROR)
     return
   end
-  open_diff_range(resolved.base_commit, resolved.head_commit)
+  -- Opened before any state is committed, for the same reason reopen_full_view does it:
+  -- DiffviewOpen can fail operationally even with diffview.nvim installed, and committing
+  -- the window first would leave state claiming an iteration the visible diff never
+  -- switched to.
+  local opened, oerr = pcall(open_diff_range, resolved.base_commit, resolved.head_commit)
+  if not opened then
+    vim.notify(('ado-pr: could not open the diff against %s: %s'):format(resolved.base_commit, tostring(oerr)), vim.log.levels.ERROR)
+    return
+  end
   set_diff({ base = resolved.base_commit, head = resolved.head_commit, window = resolved.window })
   wire_threads(state.get(), resolved.window)
   view.attach()
