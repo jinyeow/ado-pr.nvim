@@ -32,6 +32,14 @@ local M = {}
 ---@field window table|nil    the active iteration window, `{ iteration, base_iteration }`,
 ---                            or nil for the plain full-PR view (docs/design/
 ---                            pr-comment-threads.md's `resolve(thread, window)` contract).
+---@field override_base string|nil the session-only diff-base override set by
+---                            :AdoPrSetDiffBase, or nil when none is active. `pr_base`
+---                            itself is never touched by this -- always the true
+---                            ADO-resolved base. The effective Full-PR-view base is
+---                            `override_base or pr_base` -- M.effective_base() reports it
+---                            for :AdoPrShowDiffBase. review.lua's reopen path applies the
+---                            same formula to the CANDIDATE override it is switching to,
+---                            since it must know the base before it commits `override_base`.
 
 ---@type AdoPrContext|nil
 local current = nil
@@ -55,6 +63,16 @@ function M.range()
     return nil
   end
   return current.base .. '...' .. (current.head or 'HEAD')
+end
+
+-- The effective base for the Full-PR view: the active diff-base override if one is set,
+-- else the PR's original resolved base (`pr_base`). One source of truth for "the current
+-- base" so review.lua's reopen path and :AdoPrShowDiffBase never independently drift.
+function M.effective_base()
+  if not current then
+    return nil
+  end
+  return current.override_base or current.pr_base
 end
 
 function M.clear()

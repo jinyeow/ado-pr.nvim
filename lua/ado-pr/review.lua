@@ -87,14 +87,32 @@ local function ensure_commit(cwd, sha, label)
   return true
 end
 
--- Close the previous diff view, if this session has one open, before opening a new commit
--- range -- diffview opens every view in its own new tabpage (view.lua's own comment), so
--- without this a window switch would pile up a second tab/session on top of the first
--- instead of replacing it. Only ever called after a successful diffview-backed M.open, so
--- a view is always there to close.
+-- Open a new commit range and only then close the view this session already had open --
+-- diffview opens every view in its own new tabpage (view.lua's own comment), so without
+-- closing the old one a window switch would pile up a second tab/session on top of the
+-- first instead of replacing it. The close comes AFTER the open, not before: DiffviewOpen
+-- can fail operationally even with diffview.nvim installed, and closing first would leave
+-- the user with no diff at all on such a failure. Raises on a failed open, leaving the old
+-- view untouched -- callers pcall this and report the failure (see reopen_full_view).
+--
+-- The old view is closed by running DiffviewClose in its own tabpage, captured before the
+-- open, rather than by closing that tabpage outright: if the user had wandered off the
+-- diff to an unrelated tab, DiffviewClose there simply finds no view and closes nothing,
+-- where a blind tabpage close would destroy their window. Only ever called after a
+-- successful diffview-backed M.open, so a previous tabpage always exists; the validity and
+-- distinctness checks cover only diffview declining to open its own new tabpage.
 local function open_diff_range(base_commit, head_commit)
-  pcall(vim.cmd, 'DiffviewClose')
+  local previous_tab = vim.api.nvim_get_current_tabpage()
   vim.cmd(('DiffviewOpen %s...%s'):format(base_commit, head_commit))
+  local new_tab = vim.api.nvim_get_current_tabpage()
+  if new_tab == previous_tab or not vim.api.nvim_tabpage_is_valid(previous_tab) then
+    return
+  end
+  vim.api.nvim_set_current_tabpage(previous_tab)
+  pcall(vim.cmd, 'DiffviewClose')
+  if vim.api.nvim_tabpage_is_valid(new_tab) then
+    vim.api.nvim_set_current_tabpage(new_tab)
+  end
 end
 
 -- Pure: iteration id -> the { iteration, base_iteration } window plus the commit pair to
@@ -160,25 +178,32 @@ local function fetch_target_ref(target_ref, cwd)
   return fetch
 end
 
--- Fetch the PR's real target ref and resolve it to a commit, so the review
--- diffs against what ADO actually targeted (not a possibly-stale, possibly-
--- wrong local ref). Runs with the review worktree as cwd. Returns
--- (commit|nil, err|nil).
-local function resolve_base(pr, cwd)
-  local target_ref = pr.targetRefName
-  if not target_ref or target_ref == '' then
-    return nil, 'PR payload missing targetRefName'
-  end
-  local fetch = fetch_target_ref(target_ref, cwd)
+-- Fetch `ref` (retrying via fetch_target_ref) and resolve it to a commit. Shared by
+-- resolve_base (the PR's real ADO target) and M.set_diff_base (an arbitrary user-given
+-- ref), so the retry-then-abort pattern lives in one place. Runs with the review worktree
+-- as cwd. Returns (commit|nil, err|nil).
+local function resolve_ref(ref, cwd)
+  local fetch = fetch_target_ref(ref, cwd)
   if fetch.code ~= 0 then
     local detail = fetch.stderr ~= '' and fetch.stderr or ('exit ' .. fetch.code)
-    return nil, 'git fetch ' .. target_ref .. ' failed after ' .. FETCH_RETRIES .. ' attempts: ' .. detail
+    return nil, 'git fetch ' .. ref .. ' failed after ' .. FETCH_RETRIES .. ' attempts: ' .. detail
   end
   local revparse = vim.system({ 'git', 'rev-parse', 'FETCH_HEAD' }, { text = true, cwd = cwd }):wait()
   if revparse.code ~= 0 then
     return nil, 'git rev-parse FETCH_HEAD failed: ' .. (revparse.stderr ~= '' and revparse.stderr or ('exit ' .. revparse.code))
   end
   return vim.trim(revparse.stdout or ''), nil
+end
+
+-- Fetch the PR's real target ref and resolve it to a commit, so the review
+-- diffs against what ADO actually targeted (not a possibly-stale, possibly-
+-- wrong local ref). Returns (commit|nil, err|nil).
+local function resolve_base(pr, cwd)
+  local target_ref = pr.targetRefName
+  if not target_ref or target_ref == '' then
+    return nil, 'PR payload missing targetRefName'
+  end
+  return resolve_ref(target_ref, cwd)
 end
 
 function M.open(id)
@@ -331,30 +356,108 @@ function M.select_iteration(iterations, id)
     vim.notify('ado-pr: ' .. head_err, vim.log.levels.ERROR)
     return
   end
-  open_diff_range(resolved.base_commit, resolved.head_commit)
+  -- Opened before any state is committed, for the same reason reopen_full_view does it:
+  -- DiffviewOpen can fail operationally even with diffview.nvim installed, and committing
+  -- the window first would leave state claiming an iteration the visible diff never
+  -- switched to.
+  local opened, oerr = pcall(open_diff_range, resolved.base_commit, resolved.head_commit)
+  if not opened then
+    vim.notify(('ado-pr: could not open the diff against %s: %s'):format(resolved.base_commit, tostring(oerr)), vim.log.levels.ERROR)
+    return
+  end
   set_diff({ base = resolved.base_commit, head = resolved.head_commit, window = resolved.window })
   wire_threads(state.get(), resolved.window)
   view.attach()
 end
 
--- Return to the full-PR view: the plain thread list and the diff base...HEAD review.open
--- originally opened. A no-op when already there.
-function M.reset_window()
+-- (Re)open the full-PR view: the plain thread list and the diff against `new_override_base`
+-- (nil for "no override", i.e. the PR's own pr_base) and HEAD. Unconditional -- fires even
+-- when already in the full-PR view, since setting or clearing an override is the common case
+-- of needing a fresh render while already there, not a genuine no-op the way "already
+-- browsing this exact iteration" would be. Shared by M.reset_window (the
+-- iteration-window-reset call site, which passes the override already in effect so its own
+-- behaviour is unchanged), M.set_diff_base and M.reset_diff_base.
+--
+-- The candidate override is a PARAMETER rather than something the callers commit to state
+-- first: DiffviewOpen can fail operationally even with diffview.nvim installed (a revspec
+-- edge case, an internal diffview error), and a caller that had already written
+-- `override_base` would leave state claiming a base the visible diff never moved to. Opening
+-- first and committing `override_base` together with base/head/window only on success keeps
+-- the whole switch atomic -- the same reason set_diff() exists as one assignment site.
+local function reopen_full_view(new_override_base)
   local ctx = state.get()
   if not (ctx and ctx.pr_base) then
     vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
     return
   end
-  if not ctx.window then
+  if not ensure_diffview() then
+    return
+  end
+  local base = new_override_base or ctx.pr_base
+  local opened, err = pcall(open_diff_range, base, 'HEAD')
+  if not opened then
+    vim.notify(('ado-pr: could not open the diff against %s: %s'):format(base, tostring(err)), vim.log.levels.ERROR)
+    return
+  end
+  ctx.override_base = new_override_base
+  state.set(ctx)
+  set_diff({ base = base, head = nil, window = nil })
+  wire_threads(state.get(), nil)
+  view.attach()
+end
+
+-- Return to the full-PR view from browsing an iteration.
+function M.reset_window()
+  local ctx = state.get()
+  reopen_full_view(ctx and ctx.override_base)
+end
+
+-- Validate/resolve `ref` to a commit (same retry-then-abort pattern as resolve_base) and
+-- set it as the session-only diff-base override for the Full-PR view (docs/specs/
+-- diff-base-override.md). On success, exits any active iteration window and reopens the
+-- full-PR view against the new override. On failure, state and the active diff are left
+-- untouched.
+function M.set_diff_base(ref)
+  local ctx = state.get()
+  if not (ctx and ctx.repo_root) then
+    vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
     return
   end
   if not ensure_diffview() then
     return
   end
-  open_diff_range(ctx.pr_base, 'HEAD')
-  set_diff({ base = ctx.pr_base, head = nil, window = nil })
-  wire_threads(state.get(), nil)
-  view.attach()
+  local commit, err = resolve_ref(ref, ctx.repo_root)
+  if not commit then
+    vim.notify('ado-pr: ' .. err, vim.log.levels.ERROR)
+    return
+  end
+  reopen_full_view(commit)
+end
+
+-- Report the currently effective Full-PR-view diff base, and whether it's an active
+-- :AdoPrSetDiffBase override or the ADO-resolved default.
+function M.show_diff_base()
+  local ctx = state.get()
+  if not (ctx and ctx.pr_base) then
+    vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
+    return
+  end
+  local base = state.effective_base()
+  local origin = ctx.override_base and 'override' or 'ADO-resolved default'
+  vim.notify(('ado-pr: diff base %s (%s)'):format(base, origin), vim.log.levels.INFO)
+end
+
+-- Clear the active diff-base override and reopen the full-PR view against pr_base.
+function M.reset_diff_base()
+  local ctx = state.get()
+  if not (ctx and ctx.pr_base) then
+    vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
+    return
+  end
+  if not ensure_diffview() then
+    return
+  end
+  reopen_full_view(nil)
 end
 
 -- Post an inline comment thread on the line under the cursor in the diff.

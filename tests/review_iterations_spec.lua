@@ -176,10 +176,25 @@ local function stub_system()
   end
 end
 
+-- Substring of the ex-command the stub should throw on, or nil for "none throws" -- same
+-- mutable-slot idiom tests/review_diff_base_spec.lua uses to simulate an operational
+-- Diffview failure (diffview.nvim IS installed, the open itself errors).
+local cmd_error_on
+
 local real_cmd = vim.cmd
 local function stub_cmd()
   vim.cmd = function(c)
     table.insert(calls, { kind = 'cmd', cmd = c })
+    if cmd_error_on and c:find(cmd_error_on, 1, true) then
+      error('Diffview: ' .. c .. ' failed')
+    end
+    -- Real tabpage, because open_diff_range's ordering is expressed in tabpages: it
+    -- captures the current one, opens the new view, then closes only that captured one.
+    -- Diffview opens every view in its own new tabpage (view.lua's own comment), so the
+    -- stub has to move the tabpage too or the "close the OLD one" branch never fires.
+    if c:find('DiffviewOpen', 1, true) then
+      real_cmd('tabnew')
+    end
   end
 end
 
@@ -216,6 +231,7 @@ local function reset(opts)
   iterations_result = { code = 0, stdout = vim.json.encode({ count = #iterations, value = iterations }), stderr = '' }
   cat_file_result = (opts and opts.cat_file_result) or { code = 0, stdout = '', stderr = '' }
   git_fetch_sha_result = (opts and opts.git_fetch_sha_result) or { code = 0, stdout = '', stderr = '' }
+  cmd_error_on = nil
 end
 
 local function cmd_calls()
@@ -243,9 +259,9 @@ local function open_pr(id)
   review.open(id or 21121)
 end
 
--- Selecting an iteration: closes the existing diff, opens the new commit range, captures
--- the window into state, fetches with list_threads_tracked (not list_threads), and
--- re-wires signs + the follower pane.
+-- Selecting an iteration: opens the new commit range, closes the previous view only once
+-- that succeeded, captures the window into state, fetches with list_threads_tracked (not
+-- list_threads), and re-wires signs + the follower pane.
 do
   reset()
   open_pr()
@@ -261,9 +277,9 @@ do
       diff_open_idx = i
     end
   end
-  ok(diff_close_idx ~= nil, 'select_iteration: closes the existing diff first')
   ok(diff_open_idx ~= nil, 'select_iteration: opens the new iterations commit range', vim.inspect(cmd_calls()))
-  ok(diff_close_idx and diff_open_idx and diff_close_idx < diff_open_idx, 'select_iteration: close precedes open')
+  ok(diff_close_idx ~= nil, 'select_iteration: closes the previous view', vim.inspect(cmd_calls()))
+  ok(diff_close_idx and diff_open_idx and diff_open_idx < diff_close_idx, 'select_iteration: open precedes close, so a failed open leaves the old view up')
 
   local tracked_call
   for _, c in ipairs(calls) do
@@ -347,6 +363,30 @@ do
   ok(has_level(vim.log.levels.ERROR), 'select_iteration: unknown id notifies ERROR')
 end
 
+-- A DiffviewOpen that fails operationally must leave the diff the user already had on
+-- screen: the close only ever runs after a successful open, so no DiffviewClose is issued
+-- at all here and the tabpage the previous view lived in is still the current one.
+do
+  reset()
+  open_pr()
+  calls, signs_calls, view_calls, set_threads_calls = {}, {}, {}, {}
+  local previous_tab = vim.api.nvim_get_current_tabpage()
+  cmd_error_on = 'DiffviewOpen'
+
+  pcall(review.select_iteration, iterations, 3)
+  cmd_error_on = nil
+
+  local closed
+  for _, c in ipairs(cmd_calls()) do
+    if c.cmd == 'DiffviewClose' then
+      closed = true
+    end
+  end
+  ok(not closed, 'select_iteration, DiffviewOpen fails: the previous view is never closed', vim.inspect(cmd_calls()))
+  ok(vim.api.nvim_tabpage_is_valid(previous_tab), 'select_iteration, DiffviewOpen fails: the previous views tabpage survives')
+  ok(vim.api.nvim_get_current_tabpage() == previous_tab, 'select_iteration, DiffviewOpen fails: still on the previous views tabpage')
+end
+
 -- select_iteration/reset_window guard against diffview not being available, the same way
 -- browse_iterations already does -- both call DiffviewOpen/DiffviewClose too.
 do
@@ -416,7 +456,9 @@ do
   ok(state.get().head == nil, 'reset_window: state.head cleared (defaults back to HEAD)')
 end
 
--- reset_window on the already-full view is a no-op (nothing to restore).
+-- reset_window on the already-full view still reopens (unconditional per docs/specs/
+-- diff-base-override.md -- setting/resetting a diff-base override is the common case of
+-- needing a fresh render while already in the full-PR view, so this is not a no-op).
 do
   reset()
   open_pr()
@@ -424,8 +466,14 @@ do
 
   review.reset_window()
 
-  ok(#cmd_calls() == 0, 'reset_window: no-op when already on the full view')
-  ok(#set_threads_calls == 0, 'reset_window: no-op does not re-fetch')
+  local diff_open_idx
+  for _, c in ipairs(cmd_calls()) do
+    if c.cmd == 'DiffviewOpen deadbeef...HEAD' then
+      diff_open_idx = true
+    end
+  end
+  ok(diff_open_idx, 'reset_window: reopens even when already on the full view', vim.inspect(cmd_calls()))
+  ok(#set_threads_calls == 1, 'reset_window: re-fetches threads even when already on the full view')
 end
 
 -- Commenting while browsing an iteration window is refused -- the right-side lines in a

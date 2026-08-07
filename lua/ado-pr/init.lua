@@ -30,4 +30,16 @@ function M.browse_iterations()
   return require('ado-pr.review').browse_iterations()
 end
 
+function M.set_diff_base(ref)
+  return require('ado-pr.review').set_diff_base(ref)
+end
+
+function M.show_diff_base()
+  return require('ado-pr.review').show_diff_base()
+end
+
+function M.reset_diff_base()
+  return require('ado-pr.review').reset_diff_base()
+end
+
 return M
