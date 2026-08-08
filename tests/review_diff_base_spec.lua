@@ -49,8 +49,10 @@ package.loaded['fzf-lua'] = {
 -- comment blocks below can drive the resolved side directly -- `anchor.resolve`'s own
 -- side/status logic is covered in tests/anchor_spec.lua, not re-tested here.
 local anchor_side
+local current_call_args
 package.loaded['ado-pr.anchor'] = {
-  current = function()
+  current = function(...)
+    current_call_args = { n = select('#', ...), ... }
     return { filePath = '/src/foo.lua', line_start = 9, line_end = 9, side = anchor_side }
   end,
 }
@@ -182,6 +184,7 @@ local function reset()
   calls = {}
   post_calls = {}
   anchor_side = 'right'
+  current_call_args = nil
   signs_calls = {}
   view_calls = {}
   set_threads_calls = {}
@@ -704,6 +707,21 @@ do
 
   ok(#post_calls == 1, 'comment left + no override: thread posted normally', #post_calls)
   ok(not has_level(vim.log.levels.ERROR), 'comment left + no override: no ERROR', vim.inspect(notifications))
+end
+
+-- M.comment's line1/line2 (the command's cursor line or visual-selection span) must reach
+-- anchor.current unchanged and in order -- this is the only place a selection range enters
+-- the anchor, so a dropped or swapped pass-through would otherwise go unobserved (ADR-0003).
+do
+  reset()
+  open_pr()
+  notifications, post_calls = {}, {}
+  current_call_args = nil
+
+  review.comment('some text', 10, 15)
+
+  eq(current_call_args, { n = 2, 10, 15 }, 'comment pass-through: line1/line2 forwarded to anchor.current in order')
+  ok(#post_calls == 1, 'comment pass-through: thread posted', #post_calls)
 end
 
 vim.system = real_system
