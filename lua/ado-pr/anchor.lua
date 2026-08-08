@@ -49,6 +49,9 @@ function M.resolve(opts)
   if not raw or raw == '' or raw == 'null' then
     return nil, 'no file on the ' .. side .. ' side to anchor to'
   end
+  if opts.line_start and opts.line_end and opts.line_start > opts.line_end then
+    return nil, 'line_start (' .. opts.line_start .. ') is after line_end (' .. opts.line_end .. ')'
+  end
 
   local filePath = '/' .. raw:gsub('\\', '/'):gsub('^/', '')
   return { filePath = filePath, side = side, line_start = opts.line_start, line_end = opts.line_end }

@@ -182,6 +182,20 @@ do
   ok(a == nil and err ~= nil, 'null right path: rejected', tostring(err))
 end
 
+-- A reversed range (line_start > line_end) is an error, not a silently-posted reversed span.
+do
+  local a, err = anchor.resolve({
+    path = 'src/foo.lua',
+    oldpath = 'src/foo.lua',
+    winid_a = 1000,
+    winid_b = 1001,
+    cur_win = 1001,
+    line_start = 15,
+    line_end = 10,
+  })
+  ok(a == nil and err ~= nil, 'reversed range: rejected', tostring(err))
+end
+
 if #failures > 0 then
   io.stderr:write(('FAIL %d/%d\n'):format(#failures, count))
   for _, f in ipairs(failures) do
