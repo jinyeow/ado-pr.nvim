@@ -60,11 +60,11 @@ end
 -- Adapter: read the active diffview view (via ado-pr.diffview_state) and
 -- resolve the cursor/range. Untested (thin glue over diffview internals); validated
 -- by smoke test. Keep logic in `resolve`, above.
--- line_start/line_end: the command's o.line1/o.line2 -- Neovim's `-range` on a user
--- command defaults these to the cursor line when no range was given, so a plain
+-- range: { line_start, line_end } -- the command's o.line1/o.line2 -- Neovim's `-range` on
+-- a user command defaults these to the cursor line when no range was given, so a plain
 -- `:AdoPrComment` and a `:'<,'>AdoPrComment` both flow through the same call shape
 -- (ADR-0003).
-function M.current(line_start, line_end)
+function M.current(range)
   local diffview_state = require('ado-pr.diffview_state')
   local state, err = diffview_state.current()
   if not state then
@@ -78,8 +78,8 @@ function M.current(line_start, line_end)
     winid_a = windows.a and windows.a.winid,
     winid_b = windows.b and windows.b.winid,
     cur_win = vim.api.nvim_get_current_win(),
-    line_start = line_start,
-    line_end = line_end,
+    line_start = range and range.line_start,
+    line_end = range and range.line_end,
   })
 end
 

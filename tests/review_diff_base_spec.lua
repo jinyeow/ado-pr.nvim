@@ -718,9 +718,9 @@ do
   notifications, post_calls = {}, {}
   current_call_args = nil
 
-  review.comment('some text', 10, 15)
+  review.comment('some text', { line_start = 10, line_end = 15 })
 
-  eq(current_call_args, { n = 2, 10, 15 }, 'comment pass-through: line1/line2 forwarded to anchor.current in order')
+  eq(current_call_args, { n = 1, { line_start = 10, line_end = 15 } }, 'comment pass-through: range forwarded to anchor.current unchanged')
   ok(#post_calls == 1, 'comment pass-through: thread posted', #post_calls)
 end
 
