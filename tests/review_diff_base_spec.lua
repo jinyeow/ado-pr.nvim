@@ -51,7 +51,7 @@ package.loaded['fzf-lua'] = {
 local anchor_side
 package.loaded['ado-pr.anchor'] = {
   current = function()
-    return { filePath = '/src/foo.lua', line = 9, side = anchor_side }
+    return { filePath = '/src/foo.lua', line_start = 9, line_end = 9, side = anchor_side }
   end,
 }
 

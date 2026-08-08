@@ -16,7 +16,8 @@ local function eq(a, b, name)
   ok(vim.deep_equal(a, b), name, vim.inspect(a) .. ' ~= ' .. vim.inspect(b))
 end
 
--- Cursor in the RIGHT (new) window anchors on the new path, right side.
+-- Cursor in the RIGHT (new) window anchors on the new path, right side. A plain cursor
+-- comment is the degenerate range where line_start == line_end (ADR-0003).
 do
   local a, err = anchor.resolve({
     path = 'src/foo.lua',
@@ -24,10 +25,11 @@ do
     winid_a = 1000,
     winid_b = 1001,
     cur_win = 1001,
-    cur_line = 42,
+    line_start = 42,
+    line_end = 42,
   })
   ok(a and not err, 'right: no error', err)
-  eq(a, { filePath = '/src/foo.lua', line = 42, side = 'right' }, 'right: anchor')
+  eq(a, { filePath = '/src/foo.lua', side = 'right', line_start = 42, line_end = 42 }, 'right: anchor')
 end
 
 -- Cursor in the LEFT (old) window anchors on the old path, left side.
@@ -38,9 +40,25 @@ do
     winid_a = 1000,
     winid_b = 1001,
     cur_win = 1000,
-    cur_line = 7,
+    line_start = 7,
+    line_end = 7,
   })
-  eq(a, { filePath = '/src/foo.lua', line = 7, side = 'left' }, 'left: anchor')
+  eq(a, { filePath = '/src/foo.lua', side = 'left', line_start = 7, line_end = 7 }, 'left: anchor')
+end
+
+-- A visual-selection range spanning lines posts one thread with the correct start/end,
+-- not one thread per line (issue #61 acceptance criterion).
+do
+  local a = anchor.resolve({
+    path = 'src/foo.lua',
+    oldpath = 'src/foo.lua',
+    winid_a = 1000,
+    winid_b = 1001,
+    cur_win = 1001,
+    line_start = 10,
+    line_end = 15,
+  })
+  eq(a, { filePath = '/src/foo.lua', side = 'right', line_start = 10, line_end = 15 }, 'range: anchor spans the selection')
 end
 
 -- A rename keeps each side on its own path.
@@ -51,9 +69,10 @@ do
     winid_a = 1000,
     winid_b = 1001,
     cur_win = 1000,
-    cur_line = 3,
+    line_start = 3,
+    line_end = 3,
   })
-  eq(a, { filePath = '/src/old.lua', line = 3, side = 'left' }, 'rename left uses oldpath')
+  eq(a, { filePath = '/src/old.lua', side = 'left', line_start = 3, line_end = 3 }, 'rename left uses oldpath')
 end
 
 -- Windows-style backslashes normalize to forward slashes; no double leading slash.
@@ -64,9 +83,10 @@ do
     winid_a = 1000,
     winid_b = 1001,
     cur_win = 1001,
-    cur_line = 1,
+    line_start = 1,
+    line_end = 1,
   })
-  eq(a, { filePath = '/src/a/b.lua', line = 1, side = 'right' }, 'backslash normalized')
+  eq(a, { filePath = '/src/a/b.lua', side = 'right', line_start = 1, line_end = 1 }, 'backslash normalized')
 end
 
 -- Cursor outside both diff windows (e.g. the file panel) is an error, not a guess.
@@ -77,7 +97,8 @@ do
     winid_a = 1000,
     winid_b = 1001,
     cur_win = 1234,
-    cur_line = 5,
+    line_start = 5,
+    line_end = 5,
   })
   ok(a == nil and err ~= nil, 'panel cursor: rejected', tostring(err))
 end
@@ -93,10 +114,11 @@ do
     winid_a = 1000,
     winid_b = 1001,
     cur_win = 1000,
-    cur_line = 9,
+    line_start = 9,
+    line_end = 9,
   })
   ok(a and not err, 'modified left: no error', err)
-  eq(a, { filePath = '/src/foo.lua', line = 9, side = 'left' }, 'modified left falls back to path')
+  eq(a, { filePath = '/src/foo.lua', side = 'left', line_start = 9, line_end = 9 }, 'modified left falls back to path')
 end
 
 -- Left side of an ADDED file is an error — added-ness is status, not nil oldpath.
@@ -108,7 +130,8 @@ do
     winid_a = 1000,
     winid_b = 1001,
     cur_win = 1000,
-    cur_line = 5,
+    line_start = 5,
+    line_end = 5,
   })
   ok(a == nil and err ~= nil, 'added file left side: rejected', tostring(err))
 end
@@ -122,7 +145,8 @@ do
     winid_a = 1000,
     winid_b = 1001,
     cur_win = 1001,
-    cur_line = 5,
+    line_start = 5,
+    line_end = 5,
   })
   ok(a == nil and err ~= nil, 'deleted file right side: rejected', tostring(err))
 end
@@ -137,10 +161,11 @@ do
     winid_a = 1000,
     winid_b = 1001,
     cur_win = 1000,
-    cur_line = 4,
+    line_start = 4,
+    line_end = 4,
   })
   ok(a and not err, 'deleted left: no error', err)
-  eq(a, { filePath = '/src/deleted.lua', line = 4, side = 'left' }, 'deleted file left side: side is left')
+  eq(a, { filePath = '/src/deleted.lua', side = 'left', line_start = 4, line_end = 4 }, 'deleted file left side: side is left')
 end
 
 -- A "null" path sentinel (diffview's deleted-side marker) is an error.
@@ -151,7 +176,8 @@ do
     winid_a = 1000,
     winid_b = 1001,
     cur_win = 1001,
-    cur_line = 5,
+    line_start = 5,
+    line_end = 5,
   })
   ok(a == nil and err ~= nil, 'null right path: rejected', tostring(err))
 end

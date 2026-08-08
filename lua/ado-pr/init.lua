@@ -34,8 +34,8 @@ function M.vote(id, v)
   return require('ado-pr.az').set_vote(id, v)
 end
 
-function M.comment(text)
-  return require('ado-pr.review').comment(text)
+function M.comment(text, line1, line2)
+  return require('ado-pr.review').comment(text, line1, line2)
 end
 
 function M.browse_iterations()

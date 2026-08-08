@@ -11,14 +11,17 @@
 local M = {}
 
 -- Pure resolver. opts:
---   path     new-side repo-relative path (diffview FileEntry.path)
---   oldpath  old-side repo-relative path (FileEntry.oldpath; set ONLY on renames)
---   status   git status letter (FileEntry.status: 'A' added, 'D' deleted, …)
---   winid_a  left/old diff window id
---   winid_b  right/new diff window id
---   cur_win  the currently focused window id
---   cur_line one-based cursor line
--- Returns { filePath = '/rel/path', line, side = 'right'|'left' }, or nil, err.
+--   path       new-side repo-relative path (diffview FileEntry.path)
+--   oldpath    old-side repo-relative path (FileEntry.oldpath; set ONLY on renames)
+--   status     git status letter (FileEntry.status: 'A' added, 'D' deleted, …)
+--   winid_a    left/old diff window id
+--   winid_b    right/new diff window id
+--   cur_win    the currently focused window id
+--   line_start one-based first line of the anchor (the cursor line for a plain comment)
+--   line_end   one-based last line of the anchor (equal to line_start for a plain comment)
+-- Returns { filePath = '/rel/path', side = 'right'|'left', line_start, line_end }, or nil, err.
+-- The anchor is always range-shaped (ADR-0003); a single-line comment is the degenerate
+-- case where line_start == line_end, not a separate code path.
 function M.resolve(opts)
   local side
   if opts.cur_win == opts.winid_b then
@@ -48,13 +51,17 @@ function M.resolve(opts)
   end
 
   local filePath = '/' .. raw:gsub('\\', '/'):gsub('^/', '')
-  return { filePath = filePath, line = opts.cur_line, side = side }
+  return { filePath = filePath, side = side, line_start = opts.line_start, line_end = opts.line_end }
 end
 
 -- Adapter: read the active diffview view (via ado-pr.diffview_state) and
--- resolve the cursor. Untested (thin glue over diffview internals); validated
+-- resolve the cursor/range. Untested (thin glue over diffview internals); validated
 -- by smoke test. Keep logic in `resolve`, above.
-function M.current()
+-- line_start/line_end: the command's o.line1/o.line2 -- Neovim's `-range` on a user
+-- command defaults these to the cursor line when no range was given, so a plain
+-- `:AdoPrComment` and a `:'<,'>AdoPrComment` both flow through the same call shape
+-- (ADR-0003).
+function M.current(line_start, line_end)
   local diffview_state = require('ado-pr.diffview_state')
   local state, err = diffview_state.current()
   if not state then
@@ -68,7 +75,8 @@ function M.current()
     winid_a = windows.a and windows.a.winid,
     winid_b = windows.b and windows.b.winid,
     cur_win = vim.api.nvim_get_current_win(),
-    cur_line = vim.api.nvim_win_get_cursor(0)[1],
+    line_start = line_start,
+    line_end = line_end,
   })
 end
 

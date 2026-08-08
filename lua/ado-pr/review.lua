@@ -480,9 +480,12 @@ function M.reset_diff_base()
   reopen_full_view(nil)
 end
 
--- Post an inline comment thread on the line under the cursor in the diff.
--- text: optional comment content (`:AdoPrComment some text`); prompted when nil.
-function M.comment(text)
+-- Post an inline comment thread on the diff line(s) under the cursor, or spanning a visual
+-- selection (`:'<,'>AdoPrComment`). text: optional comment content (`:AdoPrComment some
+-- text`); prompted when nil. line1/line2: the command's o.line1/o.line2 -- equal to each
+-- other (the cursor line) for a plain `:AdoPrComment`, and the selection's line span for a
+-- ranged invocation (ADR-0003).
+function M.comment(text, line1, line2)
   local ctx = state.get()
   if not ctx or not ctx.repositoryId then
     vim.notify('ado-pr: no active PR — run :AdoPr / :AdoPrReview first', vim.log.levels.ERROR)
@@ -492,7 +495,7 @@ function M.comment(text)
     vim.notify('ado-pr: cannot comment while browsing an iteration window -- return to the full PR view first (:AdoPrIterations)', vim.log.levels.ERROR)
     return
   end
-  local a, err = anchor.current()
+  local a, err = anchor.current(line1, line2)
   if not a then
     vim.notify('ado-pr: ' .. err, vim.log.levels.ERROR)
     return
@@ -522,8 +525,9 @@ function M.comment(text)
   if text then
     return post(text)
   end
+  local where = a.line_start == a.line_end and tostring(a.line_start) or (a.line_start .. '-' .. a.line_end)
   vim.ui.input({
-    prompt = ('PR comment @ %s:%d (%s): '):format(a.filePath, a.line, a.side),
+    prompt = ('PR comment @ %s:%s (%s): '):format(a.filePath, where, a.side),
   }, post)
 end
 
