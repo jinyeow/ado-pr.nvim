@@ -21,8 +21,12 @@ vim.api.nvim_create_user_command('AdoPrVote', function(o)
 end, { nargs = '+', desc = 'ado-pr: AdoPrVote <id> approve|wait-for-author|reject|reset' })
 
 vim.api.nvim_create_user_command('AdoPrComment', function(o)
-  require('ado-pr').comment(o.args ~= '' and o.args or nil)
-end, { nargs = '*', desc = 'ado-pr: comment on the diff line under the cursor (inline text or prompted)' })
+  require('ado-pr').comment(o.args ~= '' and o.args or nil, { line_start = o.line1, line_end = o.line2 })
+end, {
+  nargs = '*',
+  range = true,
+  desc = 'ado-pr: comment on the diff line under the cursor, or the line span of a visual selection (inline text or prompted)',
+})
 
 vim.api.nvim_create_user_command('AdoPrIterations', function()
   require('ado-pr').browse_iterations()

@@ -68,10 +68,11 @@ local function has_arg(val)
   return false
 end
 
--- Right-side comment: rightFile* set, leftFile* absent.
+-- Right-side comment: rightFile* set, leftFile* absent. Single-line is the degenerate
+-- range where line_start == line_end (ADR-0003).
 do
   local ctx = { id = 77, repositoryId = 'repo-guid', project = 'My Project' }
-  local anchor = { filePath = '/src/foo.lua', line = 12, side = 'right' }
+  local anchor = { filePath = '/src/foo.lua', line_start = 12, line_end = 12, side = 'right' }
   local thread_id, err = az.post_thread(ctx, anchor, 'looks good')
   ok(thread_id == 4242 and not err, 'right: returns thread id', tostring(err or thread_id))
 
@@ -99,12 +100,34 @@ end
 -- Left-side comment: leftFile* set, rightFile* absent.
 do
   local ctx = { id = 5, repositoryId = 'g', project = 'P' }
-  local anchor = { filePath = '/a.lua', line = 3, side = 'left' }
+  local anchor = { filePath = '/a.lua', line_start = 3, line_end = 3, side = 'left' }
   az.post_thread(ctx, anchor, 'why removed?')
   local tc = captured.body.threadContext
   ok(tc.leftFileStart.line == 3 and tc.leftFileStart.offset == 1, 'left: leftFileStart')
   ok(tc.leftFileEnd.line == 3, 'left: leftFileEnd')
   ok(tc.rightFileStart == nil and tc.rightFileEnd == nil, 'left: no rightFile*')
+end
+
+-- A range anchor (visual selection spanning lines) posts distinct start/end positions,
+-- not one shared zero-width position (issue #61 acceptance criterion).
+do
+  local ctx = { id = 9, repositoryId = 'g', project = 'P' }
+  local anchor = { filePath = '/b.lua', line_start = 10, line_end = 15, side = 'right' }
+  az.post_thread(ctx, anchor, 'range comment')
+  local tc = captured.body.threadContext
+  ok(tc.rightFileStart.line == 10 and tc.rightFileStart.offset == 1, 'range: rightFileStart at line_start')
+  ok(tc.rightFileEnd.line == 15 and tc.rightFileEnd.offset == 1, 'range: rightFileEnd at line_end')
+end
+
+-- A left-side range anchor (visual selection on the old side) posts distinct start/end
+-- positions too, not just the right side (issue #61 acceptance criterion).
+do
+  local ctx = { id = 10, repositoryId = 'g', project = 'P' }
+  local anchor = { filePath = '/a.lua', line_start = 3, line_end = 7, side = 'left' }
+  az.post_thread(ctx, anchor, 'left range comment')
+  local tc = captured.body.threadContext
+  ok(tc.leftFileStart.line == 3 and tc.leftFileStart.offset == 1, 'left range: leftFileStart at line_start')
+  ok(tc.leftFileEnd.line == 7 and tc.leftFileEnd.offset == 1, 'left range: leftFileEnd at line_end')
 end
 
 vim.system = real_system

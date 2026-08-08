@@ -60,7 +60,7 @@ require('ado-pr').setup({
 | `:AdoPr` | Pick an active PR (fzf-lua) → checkout + diff |
 | `:AdoPrReview <id>` | Checkout PR `<id>` into the current worktree and open its diff |
 | `:AdoPrVote <id> <vote>` | `approve` / `approve-with-suggestions` / `wait-for-author` / `reject` / `reset` |
-| `:AdoPrComment` | Comment on the diff line under the cursor (right/left side from the focused pane) |
+| `:AdoPrComment` | Comment on the diff line under the cursor, or the line span of a visual selection (right/left side from the focused pane) |
 | `:AdoPrIterations` | Browse the PR's iterations (one push at a time), or return to the full-PR view |
 | `:AdoPrSetScope <field>=<value>…` | Override the auto-detected `organization`/`project`/`repository` for this Neovim session only (never written to disk); an explicit `setup()` value for a field still wins |
 | `:AdoPrShowScope` | Show the effective `organization`/`project`/`repository` and whether each came from `setup()`, the session override, or auto-detection |

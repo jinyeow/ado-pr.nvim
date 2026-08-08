@@ -149,15 +149,19 @@ end
 --   status 1 = active; commentType 1 = text; a one-based line/offset on the
 --   right (new) side or the left (old) side, never both.
 --   ctx:    { id, repositoryId, project } (see ado-pr.state)
---   anchor: { filePath = '/rel', line, side = 'right'|'left' } (see ado-pr.anchor)
+--   anchor: { filePath = '/rel', side = 'right'|'left', line_start, line_end } (see ado-pr.anchor)
 -- Returns (thread_id|nil, err|nil).
 function M.post_thread(ctx, anchor, content)
-  local pos = { line = anchor.line, offset = 1 }
+  -- Distinct start/end positions -- a single-line anchor has line_start == line_end, so
+  -- this covers both without a separate code path. Column offsets stay full-line (offset:
+  -- 1 on both ends) in this ticket; sub-line precision is issue #62.
+  local pos_start = { line = anchor.line_start, offset = 1 }
+  local pos_end = { line = anchor.line_end, offset = 1 }
   local thread_context = { filePath = anchor.filePath }
   if anchor.side == 'left' then
-    thread_context.leftFileStart, thread_context.leftFileEnd = pos, pos
+    thread_context.leftFileStart, thread_context.leftFileEnd = pos_start, pos_end
   else
-    thread_context.rightFileStart, thread_context.rightFileEnd = pos, pos
+    thread_context.rightFileStart, thread_context.rightFileEnd = pos_start, pos_end
   end
   local thread = {
     comments = { { content = content, commentType = 1 } },
