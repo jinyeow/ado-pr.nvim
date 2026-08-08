@@ -51,12 +51,20 @@ project brain (`research/2026-08-08-ado-offset-semantics.md`). Facts established
 
 ## Decision
 
+This decision covers the full anchor design, delivered across two tickets:
+[#61](https://github.com/jinyeow/ado-pr.nvim/issues/61) ships the line-range write
+path (shipped — `anchor.resolve` returns `{ filePath, side, line_start, line_end }`
+and `az.lua` posts `offset = 1` on both ends); the column/character-offset work
+below is accepted here but implemented separately as
+[#62](https://github.com/jinyeow/ado-pr.nvim/issues/62) (open, not yet shipped).
+
 - **`:AdoPrComment` takes `-range`.** `:AdoPrComment` (no range) stays single-line;
   `:'<,'>AdoPrComment` reads `o.line1`/`o.line2` for the line span. Neovim resolves
   `'<,'>` in buffer order always, so a "reversed range" can't reach `anchor.resolve`.
 - **Anchor is always a range; single-line is the degenerate case.** `anchor.resolve`
   is widened to return `{ filePath, side, line_start, line_end, col_start, col_end }`
-  rather than gaining a parallel range-only function. A plain cursor comment sets
+  rather than gaining a parallel range-only function (`col_start`/`col_end` arrive
+  with #62; #61's shipped shape stops at `line_end`). A plain cursor comment sets
   `line_start == line_end` and the full-line column span. This matches the read
   path's existing `{ line_start, line_end }` shape (ADR-0002) instead of diverging
   from it.
@@ -64,10 +72,11 @@ project brain (`research/2026-08-08-ado-offset-semantics.md`). Facts established
   exactly one diffview window (left or right), so the "cross-side selection" question
   raised in #51 does not arise through this trigger — there is no code path that could
   construct one.
-- **Column offsets are in scope, not deferred**, now that their semantics are mostly
-  confirmed rather than assumed (the one open gap — codepoint vs. UTF-16 code-unit
-  counting, see Context — is carried forward as a documented assumption, not treated
-  as settled). `anchor.lua` converts the buffer's byte column to a UTF-16 code-unit
+- **Column offsets are decided here, implemented as #62 (not yet shipped)** — in
+  scope for this ADR rather than deferred as an open question, now that their
+  semantics are mostly confirmed rather than assumed (the one open gap — codepoint
+  vs. UTF-16 code-unit counting, see Context — is carried forward as a documented
+  assumption, not treated as settled). `anchor.lua` converts the buffer's byte column to a UTF-16 code-unit
   column via `vim.str_utfindex(line, 'utf-16', byte_col)` (not `vim.str_utf_pos`,
   which counts codepoints and would silently diverge on non-BMP characters) before it
   becomes ADO's `offset`. The conversion happens once, at the anchor boundary —
@@ -91,8 +100,8 @@ project brain (`research/2026-08-08-ado-offset-semantics.md`). Facts established
 ## Consequences
 
 - Every existing single-line call site (`review.lua:M.comment`, tests) sees the
-  anchor shape grow two fields (`line_end`, and now `col_start`/`col_end`) — a
-  breaking shape change to `anchor.resolve`'s return value, not additive.
+  anchor shape grow two fields (`line_end` in #61, then `col_start`/`col_end` in
+  #62) — a breaking shape change to `anchor.resolve`'s return value, not additive.
 - `signs.lua`, `threads.lua`, `resolved_threads.lua` need **no changes** — ADR-0002
   already built them range-native to handle threads created via the ADO web UI. They
   render per-line only; posted column precision has no visible effect there yet
@@ -111,9 +120,11 @@ project brain (`research/2026-08-08-ado-offset-semantics.md`). Facts established
   two anchor shapes for `az.lua`/`review.lua` to branch on, instead of one shape the
   read path already uses.
 - **Whole-line ranges only, defer column/character offsets** — considered as the
-  lower-risk default (no offset-semantics research needed), but rejected once the
-  live spike confirmed offset semantics cheaply and conclusively; deferring would
-  have discarded a mostly-free capability out of untested caution.
+  lower-risk default (no offset-semantics research needed), but rejected *as a scope
+  decision* once the live spike confirmed offset semantics cheaply and conclusively;
+  deferring indefinitely would have discarded a mostly-free capability out of
+  untested caution. Rejecting it means columns are committed design, not that they
+  ship with the line-range work — sequencing stays #61 first, #62 after.
 - **Detect visual mode at call time instead of `-range`** — rejected: functionally
   identical to `-range` (both ultimately read the `'<`/`'>` marks), just implicit
   instead of declared in the command's opts table.

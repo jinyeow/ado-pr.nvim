@@ -31,8 +31,10 @@ _Avoid_: push, revision
 **Anchor**:
 The mapping from where the user is in the diff — a cursor position, or a
 visual-mode selection spanning lines and characters — to an ADO thread's
-position: file path, side (left/right), a line span, and a character span
-within that span's first/last line. A single cursor comment is the
-degenerate case of the same shape, not a separate kind of anchor
+position: file path, side (left/right), and a line span
+([#61](https://github.com/jinyeow/ado-pr.nvim/issues/61)); a character span
+within that span's first/last line is decided but not yet shipped
+([#62](https://github.com/jinyeow/ado-pr.nvim/issues/62)). A single cursor
+comment is the degenerate case of the same shape, not a separate kind of anchor
 (see [#51](https://github.com/jinyeow/ado-pr.nvim/issues/51)).
 _Avoid_: position, location
