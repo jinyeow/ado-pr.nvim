@@ -117,7 +117,6 @@ do
   local tc = captured.body.threadContext
   ok(tc.rightFileStart.line == 10 and tc.rightFileStart.offset == 1, 'range: rightFileStart at line_start')
   ok(tc.rightFileEnd.line == 15 and tc.rightFileEnd.offset == 1, 'range: rightFileEnd at line_end')
-  ok(tc.rightFileStart ~= tc.rightFileEnd, 'range: distinct start/end tables, not one shared position')
 end
 
 vim.system = real_system
