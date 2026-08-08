@@ -119,6 +119,17 @@ do
   ok(tc.rightFileEnd.line == 15 and tc.rightFileEnd.offset == 1, 'range: rightFileEnd at line_end')
 end
 
+-- A left-side range anchor (visual selection on the old side) posts distinct start/end
+-- positions too, not just the right side (issue #61 acceptance criterion).
+do
+  local ctx = { id = 10, repositoryId = 'g', project = 'P' }
+  local anchor = { filePath = '/a.lua', line_start = 3, line_end = 7, side = 'left' }
+  az.post_thread(ctx, anchor, 'left range comment')
+  local tc = captured.body.threadContext
+  ok(tc.leftFileStart.line == 3 and tc.leftFileStart.offset == 1, 'left range: leftFileStart at line_start')
+  ok(tc.leftFileEnd.line == 7 and tc.leftFileEnd.offset == 1, 'left range: leftFileEnd at line_end')
+end
+
 vim.system = real_system
 
 if #failures > 0 then
